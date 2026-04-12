@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dictionary-pipeline"
+version = "0.1.0"
+description = "Dictionary-driven, pandas-first data prep pipeline with LLM-in-the-loop stages"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+    {name = "Seamus Hartmann"}
+]
+dependencies = [
+    "pandas>=2.0",
+    "pandera>=0.20",
+    "pyyaml>=6.0",
+    "openpyxl>=3.1",
+    "pyarrow>=14.0",  # for parquet checkpoints between stages
+]
+
+[project.optional-dependencies]
+llm = [
+    "anthropic>=0.40",
+]
+profiling = [
+    "ydata-profiling>=4.0",
+]
+fuzzy = [
+    "rapidfuzz>=3.0",
+]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.6",
+]
+
+[project.scripts]
+dictionary-pipeline = "dictionary_pipeline.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

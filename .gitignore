@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+dist/
+build/
+.venv/
+venv/
+
+# Pipeline runtime
+runs/
+*.parquet
+intake_manifest.json
+profile_summary.json
+schema_violations.csv
+validation_report.json
+transformations_log.jsonl
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
