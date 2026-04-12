@@ -17,6 +17,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import re
+
 import pandas as pd
 import pandera.pandas as pa
 import yaml
@@ -169,33 +171,69 @@ def build_pandera_schema(contract: Contract) -> pa.DataFrameSchema:
 
 # ---------- derivation execution ----------------------------------------------
 
+_RE_BINARY_OP = re.compile(r"^(\w+)\s*([+\-*/])\s*(\w+)$")
+_RE_GROUPBY_SIZE = re.compile(r"^groupby\((\w+)\)\.size\(\)$")
+_RE_GROUPBY_AGG = re.compile(r"^groupby\((\w+)\)\.(\w+)\.(sum|mean|min|max)\(\)$")
+
+_BINARY_OPS: dict[str, Any] = {
+    "/": lambda a, b: a / b,
+    "*": lambda a, b: a * b,
+    "+": lambda a, b: a + b,
+    "-": lambda a, b: a - b,
+}
+
+
+def _require_columns(df: pd.DataFrame, *cols: str, transformation: str) -> None:
+    """Raise KeyError if any referenced columns are missing from the DataFrame."""
+    missing = [c for c in cols if c not in df.columns]
+    if missing:
+        raise KeyError(
+            f"Derivation {transformation!r} references columns not in "
+            f"DataFrame: {missing}"
+        )
+
 
 def apply_derivations(df: pd.DataFrame, contract: Contract) -> pd.DataFrame:
     """
     Execute the derivations from the contract.
 
-    For safety this is NOT a generic eval. Each known derivation pattern is
-    matched explicitly. Add new patterns here as the contract grows.
+    Patterns are matched by regex — no eval(). Supported families:
+
+      <field_a> +|-|*|/ <field_b>       element-wise arithmetic
+      groupby(<key>).size()              per-group row count
+      groupby(<key>).<field>.sum()       per-group aggregation (sum/mean/min/max)
     """
     out = df.copy()
 
     for d in contract.derived_fields:
         t = d.transformation.strip()
 
-        if t == "product_price / product_quantity":
-            out[d.name] = out["product_price"] / out["product_quantity"]
+        m = _RE_BINARY_OP.match(t)
+        if m:
+            left, op, right = m.group(1), m.group(2), m.group(3)
+            _require_columns(out, left, right, transformation=t)
+            out[d.name] = _BINARY_OPS[op](out[left], out[right])
+            continue
 
-        elif t == "groupby(order_id).size()":
-            out[d.name] = out.groupby("order_id")["order_id"].transform("size")
+        m = _RE_GROUPBY_SIZE.match(t)
+        if m:
+            key = m.group(1)
+            _require_columns(out, key, transformation=t)
+            out[d.name] = out.groupby(key)[key].transform("size")
+            continue
 
-        elif t == "groupby(order_id).product_price.sum()":
-            out[d.name] = out.groupby("order_id")["product_price"].transform("sum")
+        m = _RE_GROUPBY_AGG.match(t)
+        if m:
+            key, field, agg = m.group(1), m.group(2), m.group(3)
+            _require_columns(out, key, field, transformation=t)
+            out[d.name] = out.groupby(key)[field].transform(agg)
+            continue
 
-        else:
-            raise NotImplementedError(
-                f"Derivation pattern not registered: {t!r}. "
-                f"Add it to apply_derivations() in contract.py."
-            )
+        raise NotImplementedError(
+            f"Derivation pattern not registered: {t!r}. "
+            f"Supported: '<a> +-*/ <b>', 'groupby(<k>).size()', "
+            f"'groupby(<k>).<f>.sum|mean|min|max()'."
+        )
 
     return out
 

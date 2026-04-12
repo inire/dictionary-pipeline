@@ -7,6 +7,8 @@ import pandera.pandas as pa
 import pytest
 
 from dictionary_pipeline.contract import (
+    Contract,
+    DerivedFieldSpec,
     apply_derivations,
     build_pandera_schema,
     load_contract,
@@ -110,3 +112,132 @@ def test_rename_preserves_unmapped_columns():
     out = rename_to_contract(df, c)
     assert "order_status" in out.columns
     assert "ExtraColumn" in out.columns  # unmapped columns survive
+
+
+def test_derivation_field_agnostic_division():
+    """Division pattern should work with ANY two field names, not just product_price/product_quantity."""
+
+    contract = Contract(
+        dataset_name="test", description="", source="", grain="",
+        pii=False, pii_fields=[], naming_convention="snake_case",
+        last_updated="2026-01-01",
+        fields=[],
+        derived_fields=[
+            DerivedFieldSpec(
+                name="unit_paid",
+                label="test",
+                type="decimal",
+                dtype="float64",
+                transformation="price_paid_before_tax / product_quantity",
+            ),
+        ],
+    )
+    df = pd.DataFrame([
+        {"price_paid_before_tax": 9.0, "product_quantity": 2},
+        {"price_paid_before_tax": 4.5, "product_quantity": 1},
+    ])
+    out = apply_derivations(df, contract)
+    assert out.loc[0, "unit_paid"] == 4.5
+    assert out.loc[1, "unit_paid"] == 4.5
+
+
+def test_derivation_field_agnostic_groupby_sum():
+    """Groupby sum should work with ANY key and ANY value field."""
+
+    contract = Contract(
+        dataset_name="test", description="", source="", grain="",
+        pii=False, pii_fields=[], naming_convention="snake_case",
+        last_updated="2026-01-01",
+        fields=[],
+        derived_fields=[
+            DerivedFieldSpec(
+                name="order_total_paid",
+                label="test",
+                type="decimal",
+                dtype="float64",
+                transformation="groupby(order_id).price_paid_before_tax.sum()",
+            ),
+        ],
+    )
+    df = pd.DataFrame([
+        {"order_id": "A", "price_paid_before_tax": 9.0},
+        {"order_id": "A", "price_paid_before_tax": 4.5},
+        {"order_id": "B", "price_paid_before_tax": 20.0},
+    ])
+    out = apply_derivations(df, contract)
+    assert out.loc[0, "order_total_paid"] == 13.5
+    assert out.loc[1, "order_total_paid"] == 13.5
+    assert out.loc[2, "order_total_paid"] == 20.0
+
+
+def test_derivation_subtraction():
+    """Subtraction pattern: field_a - field_b."""
+
+    contract = Contract(
+        dataset_name="test", description="", source="", grain="",
+        pii=False, pii_fields=[], naming_convention="snake_case",
+        last_updated="2026-01-01",
+        fields=[],
+        derived_fields=[
+            DerivedFieldSpec(
+                name="discount",
+                label="test",
+                type="decimal",
+                dtype="float64",
+                transformation="product_price - price_paid_before_tax",
+            ),
+        ],
+    )
+    df = pd.DataFrame([
+        {"product_price": 10.0, "price_paid_before_tax": 9.0},
+        {"product_price": 5.0, "price_paid_before_tax": 5.0},
+    ])
+    out = apply_derivations(df, contract)
+    assert out.loc[0, "discount"] == 1.0
+    assert out.loc[1, "discount"] == 0.0
+
+
+def test_derivation_missing_column_raises():
+    """Referencing a column not in the DataFrame should raise KeyError, not a confusing pandas error."""
+
+    contract = Contract(
+        dataset_name="test", description="", source="", grain="",
+        pii=False, pii_fields=[], naming_convention="snake_case",
+        last_updated="2026-01-01",
+        fields=[],
+        derived_fields=[
+            DerivedFieldSpec(
+                name="bad",
+                label="test",
+                type="decimal",
+                dtype="float64",
+                transformation="nonexistent_col / product_quantity",
+            ),
+        ],
+    )
+    df = pd.DataFrame([{"product_quantity": 2}])
+    with pytest.raises(KeyError, match="nonexistent_col"):
+        apply_derivations(df, contract)
+
+
+def test_derivation_unrecognized_pattern_raises():
+    """Patterns that don't match any regex should still raise NotImplementedError."""
+
+    contract = Contract(
+        dataset_name="test", description="", source="", grain="",
+        pii=False, pii_fields=[], naming_convention="snake_case",
+        last_updated="2026-01-01",
+        fields=[],
+        derived_fields=[
+            DerivedFieldSpec(
+                name="bad",
+                label="test",
+                type="decimal",
+                dtype="float64",
+                transformation="MAGIC(field_a, field_b)",
+            ),
+        ],
+    )
+    df = pd.DataFrame([{"field_a": 1, "field_b": 2}])
+    with pytest.raises(NotImplementedError, match="not registered"):
+        apply_derivations(df, contract)
