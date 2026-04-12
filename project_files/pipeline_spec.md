@@ -6,7 +6,7 @@
 
 2. **Deterministic by default, LLM only where judgment is required.** Two stages call Claude (3 and 6). All others are pure Python. This bounds the failure modes: LLM stages can hallucinate but their output is captured to disk and validated by deterministic stages downstream.
 
-3. **Excel is a boundary, not a workspace.** `.xlsx` enters at Stage 0 and exits at Stage 9. Everything between is pandas DataFrames and parquet checkpoints. No Claude in Excel session is required to run the pipeline — Stage 10 is an optional final visual check, not a dependency.
+3. **Tabular files are a boundary, not a workspace.** Source data (`.xlsx`, `.csv`, `.tsv`, or any pandas-readable tabular format) enters at Stage 0; cleaned `.xlsx` exits at Stage 9. Everything between is pandas DataFrames and parquet checkpoints. No Claude in Excel session is required to run the pipeline — Stage 10 is an optional final visual check, not a dependency.
 
 4. **Drift is detectable.** Stages 4, 8, and the per-stage transformation log create three independent ways to catch unintended changes: schema re-validation, original-vs-final diff, and an append-only audit trail. Anything that mutates data writes to the log.
 
@@ -16,13 +16,19 @@
 
 ### Stage 0 — Intake & Quarantine
 
-**Tool:** Python (`shutil`, `pandas.read_excel`)
-**Input:** Source `.xlsx` file
-**Output:** `runs/<workdir>/intake/<filename>__<timestamp>.xlsx`, `intake_manifest.json`, in-memory DataFrame
+**Tool:** Python (`shutil`, `s0_intake.read_source`)
+**Input:** Source tabular file (any pandas-readable format)
+**Output:** `<workdir>/intake/<filename>__<timestamp>.<ext>`, `intake_manifest.json`, in-memory DataFrame
 
-The original file is copied to an immutable archive before any processing. The archive is the comparison target for Stage 8. The manifest captures raw column names, dtypes, row count, and sheet name — useful both for reference and for Stage 1's profile to compare against.
+Stage 0 accepts any tabular file format that pandas can read:
+- **Spreadsheets:** `.xlsx`, `.xls`, `.xlsm`, `.xlsb`, `.ods`
+- **Delimited text:** `.csv`, `.tsv`, `.tab`
 
-**Failure modes:** file not found, sheet name wrong, file locked by Excel.
+Dispatch is by file extension. The intake manifest records the reader function and its parameters so Stage 8 can replay the same read against the archived copy. Optional `--header-row` and `--nrows` CLI flags handle files with preamble rows or footer junk.
+
+The original file is copied to an immutable archive before any processing. The archive is the comparison target for Stage 8.
+
+**Failure modes:** file not found, sheet name wrong (spreadsheets), unsupported extension.
 
 ---
 
@@ -131,7 +137,7 @@ It does **not** see the rest of the DataFrame, other columns, or any business co
 **Input:** Cleaned DataFrame + Contract
 **Output:** DataFrame with derived columns appended
 
-The `derived_fields` section of the dictionary is the spec; this stage executes it. `apply_derivations()` deliberately uses pattern matching, not eval, for safety. Each new derivation pattern needs an explicit `elif` branch.
+The `derived_fields` section of the dictionary is the spec; this stage executes it. `apply_derivations()` deliberately uses regex-based pattern matching, not eval, for safety. Field names are extracted from the transformation string and used as pandas column keys — any valid contract field name works. See `dictionary_contract_format.md` for the supported pattern families.
 
 For the DoorDash example: `unit_price` (price/quantity), `order_item_count` (groupby size), `order_total` (groupby sum) — all defined in the dictionary, all executed mechanically.
 

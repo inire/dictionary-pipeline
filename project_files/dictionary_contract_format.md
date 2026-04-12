@@ -96,15 +96,30 @@ Computed columns added by Stage 7. They have a subset of field properties plus a
   review_status: confirmed
 ```
 
-### Registered transformation patterns
+### Derivation patterns
 
-The `transformation` string is matched against an explicit pattern registry in `contract.apply_derivations()`. Currently registered:
+The `transformation` string is parsed by regex in `contract.apply_derivations()`. No `eval()` is used — each pattern family is matched and dispatched safely. Field names must be valid contract field names (post-rename).
 
-- `"product_price / product_quantity"` → element-wise division
-- `"groupby(order_id).size()"` → per-group row count, broadcast back
-- `"groupby(order_id).product_price.sum()"` → per-group sum, broadcast back
+**Arithmetic (element-wise on two columns):**
 
-**To add a new pattern:** edit `apply_derivations()` in `contract.py` and add an `elif` branch matching your transformation string. There is deliberately no `eval()` — pattern matching is safer and forces explicit registration of new derivation types.
+| Pattern | Operation |
+|---------|-----------|
+| `<field_a> / <field_b>` | Division |
+| `<field_a> * <field_b>` | Multiplication |
+| `<field_a> + <field_b>` | Addition |
+| `<field_a> - <field_b>` | Subtraction |
+
+**Groupby aggregations (broadcast back to every row):**
+
+| Pattern | Operation |
+|---------|-----------|
+| `groupby(<key>).size()` | Per-group row count |
+| `groupby(<key>).<field>.sum()` | Per-group sum |
+| `groupby(<key>).<field>.mean()` | Per-group mean |
+| `groupby(<key>).<field>.min()` | Per-group min |
+| `groupby(<key>).<field>.max()` | Per-group max |
+
+Unrecognized patterns raise `NotImplementedError` with a message listing the supported families. To add a new pattern family, add a compiled regex + handler to `apply_derivations()` in `contract.py`.
 
 ## Worked example
 
