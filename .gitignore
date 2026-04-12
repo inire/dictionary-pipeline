@@ -9,6 +9,9 @@ build/
 .venv/
 venv/
 
+# Example data files (personal data — do not commit)
+examples/
+
 # Pipeline runtime
 runs/
 *.parquet
