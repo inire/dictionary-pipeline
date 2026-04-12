@@ -16,6 +16,7 @@ from dictionary_pipeline.contract import (
 )
 
 EXAMPLES = Path(__file__).parent.parent / "examples" / "doordash"
+INSTACART = Path(__file__).parent.parent / "examples" / "instacart"
 
 
 def test_load_contract_doordash():
@@ -241,3 +242,27 @@ def test_derivation_unrecognized_pattern_raises():
     df = pd.DataFrame([{"field_a": 1, "field_b": 2}])
     with pytest.raises(NotImplementedError, match="not registered"):
         apply_derivations(df, contract)
+
+
+def test_load_contract_instacart():
+    c = load_contract(INSTACART / "dictionary.yaml")
+    assert c.dataset_name == "instacart_2025_purchased_items"
+    assert len(c.fields) == 15
+    assert len(c.derived_fields) == 3
+    assert c.pii is True
+    assert "shipping_address" in c.pii_fields
+
+
+def test_instacart_derivations_against_engine():
+    """Verify the Instacart dictionary's derivations run through the field-agnostic engine."""
+    c = load_contract(INSTACART / "dictionary.yaml")
+    df = pd.DataFrame([
+        {"order_id": "'ABC", "product_price": 10.0, "product_quantity": 2},
+        {"order_id": "'ABC", "product_price": 5.0, "product_quantity": 1},
+        {"order_id": "'DEF", "product_price": 20.0, "product_quantity": 4},
+    ])
+    out = apply_derivations(df, c)
+    assert out.loc[0, "unit_price"] == 5.0
+    assert out.loc[0, "order_item_count"] == 2
+    assert out.loc[0, "order_total"] == 15.0
+    assert out.loc[2, "order_total"] == 20.0
