@@ -16,6 +16,7 @@ from pathlib import Path
 import pandas as pd
 
 from ..logging import TransformationLog
+from ..pii import redact_profile
 
 
 def profile(df: pd.DataFrame) -> dict:
@@ -67,15 +68,20 @@ def run(
     df: pd.DataFrame,
     workdir: str | Path,
     log: TransformationLog | None = None,
+    redact_pii: bool = False,
 ) -> dict:
     workdir = Path(workdir)
     summary = profile(df)
+
+    if redact_pii:
+        summary = redact_profile(summary)
+
     (workdir / "profile_summary.json").write_text(json.dumps(summary, indent=2, default=str))
     if log:
         log.log(
             stage="s1_profile",
             event="profile_generated",
             rows_affected=len(df),
-            details={"column_count": len(df.columns)},
+            details={"column_count": len(df.columns), "pii_redacted": redact_pii},
         )
     return summary
