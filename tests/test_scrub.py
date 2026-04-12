@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from dictionary_pipeline.scrub import detect_encoding
+from dictionary_pipeline.scrub import detect_encoding, scan_formula_injection
 
 
 def test_detect_utf8(tmp_path: Path):
@@ -25,3 +25,27 @@ def test_detect_utf8_bom(tmp_path: Path):
     p = tmp_path / "bom.csv"
     p.write_bytes(b"\xef\xbb\xbf" + "Name,City\nAlice,Zürich\n".encode("utf-8"))
     assert detect_encoding(p) == "utf-8-sig"
+
+
+def test_scan_finds_formula_cells(tmp_path: Path):
+    p = tmp_path / "formulas.csv"
+    p.write_text(textwrap.dedent("""\
+        Name,Value
+        Alice,100
+        =CMD("calc"),200
+        Bob,+1-555-1234
+        @SUM(A1:A3),300
+    """))
+    hits = scan_formula_injection(p)
+    assert len(hits) == 2
+    # =CMD is dangerous, @SUM is dangerous
+    # +1-555-1234 is NOT flagged (phone number pattern, not a formula)
+    assert any("=CMD" in h["value"] for h in hits)
+    assert any("@SUM" in h["value"] for h in hits)
+
+
+def test_scan_clean_file_returns_empty(tmp_path: Path):
+    p = tmp_path / "clean.csv"
+    p.write_text("Name,Age\nAlice,30\nBob,25\n")
+    hits = scan_formula_injection(p)
+    assert hits == []

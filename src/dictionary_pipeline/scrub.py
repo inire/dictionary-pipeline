@@ -7,6 +7,8 @@ control character removal, and non-standard header detection.
 
 from __future__ import annotations
 
+import csv
+import re
 from pathlib import Path
 
 import chardet
@@ -34,3 +36,39 @@ def detect_encoding(path: str | Path) -> str:
         return "utf-8"
 
     return encoding
+
+
+# Patterns that indicate CSV formula injection.
+# We intentionally DO NOT flag + followed by digits (phone numbers like +1-555-1234).
+_FORMULA_RE = re.compile(
+    r"^[=@]"           # starts with = or @
+    r"|^[+\-](?!\d)"   # starts with + or - NOT followed by a digit (excludes phone numbers, negative numbers)
+    r"|^\t[=@+\-]"     # tab-prefixed formulas (bypass attempt)
+)
+
+
+def scan_formula_injection(
+    path: str | Path,
+    encoding: str | None = None,
+) -> list[dict]:
+    """
+    Scan a CSV for cells that look like spreadsheet formula injection.
+
+    Returns a list of dicts: {"row": int, "col": str, "value": str}
+    for each suspicious cell. Empty list = clean file.
+
+    Does NOT modify the file — this is detection only.
+    """
+    path = Path(path)
+    if encoding is None:
+        encoding = detect_encoding(path)
+
+    hits: list[dict] = []
+    with path.open("r", encoding=encoding, newline="") as f:
+        reader = csv.DictReader(f)
+        for row_idx, row in enumerate(reader, start=2):  # row 1 = header
+            for col, value in row.items():
+                if value and _FORMULA_RE.match(value.strip()):
+                    hits.append({"row": row_idx, "col": col, "value": value.strip()})
+
+    return hits
