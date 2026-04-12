@@ -37,3 +37,67 @@ def test_clean_values_return_none():
     assert classify_pii("42.99") is None
     assert classify_pii("2026-03-28") is None
     assert classify_pii("Merchandise") is None
+
+
+from dictionary_pipeline.pii import redact_profile
+
+
+def test_redact_profile_scrubs_top_values():
+    profile = {
+        "row_count": 10,
+        "column_count": 2,
+        "columns": {
+            "email": {
+                "dtype": "object",
+                "null_count": 0,
+                "distinct_count": 5,
+                "top_values": {
+                    "alice@example.com": 3,
+                    "bob@test.org": 2,
+                    "carol@foo.net": 2,
+                },
+            },
+            "amount": {
+                "dtype": "float64",
+                "null_count": 0,
+                "distinct_count": 8,
+                "top_values": {
+                    "42.99": 3,
+                    "19.95": 2,
+                },
+            },
+        },
+    }
+
+    scrubbed = redact_profile(profile)
+
+    # Email top_values should be redacted
+    email_top = scrubbed["columns"]["email"]["top_values"]
+    assert "alice@example.com" not in email_top
+    assert all("[REDACTED" in k for k in email_top)
+
+    # Amount top_values should be untouched
+    amount_top = scrubbed["columns"]["amount"]["top_values"]
+    assert "42.99" in amount_top
+
+
+def test_redact_profile_preserves_structure():
+    profile = {
+        "row_count": 5,
+        "column_count": 1,
+        "columns": {
+            "name": {
+                "dtype": "object",
+                "distinct_count": 2,
+                "top_values": {"Seamus Hartmann": 3, "Eileen Hartmann": 2},
+            },
+        },
+    }
+    scrubbed = redact_profile(profile)
+    assert scrubbed["row_count"] == 5
+    assert "name" in scrubbed["columns"]
+    assert scrubbed["columns"]["name"]["distinct_count"] == 2
+    # Names should be redacted
+    name_top = scrubbed["columns"]["name"]["top_values"]
+    assert "Seamus Hartmann" not in name_top
+    assert "Eileen Hartmann" not in name_top

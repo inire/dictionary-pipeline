@@ -7,6 +7,7 @@ functions for profiles, dictionaries, and markdown outputs.
 
 from __future__ import annotations
 
+import copy
 import re
 
 
@@ -50,3 +51,56 @@ def classify_pii(value: str) -> str | None:
             return pii_type
 
     return None
+
+
+def redact_value(value: str, pii_type: str) -> str:
+    """Replace a PII value with a type-tagged placeholder."""
+    return f"[REDACTED_{pii_type.upper()}]"
+
+
+def _is_person_name(value: str) -> bool:
+    """
+    Simple heuristic: a person name is 2-4 capitalized words, no digits,
+    no special chars beyond hyphens and apostrophes.
+    """
+    if not value or any(c.isdigit() for c in value):
+        return False
+    parts = value.split()
+    if len(parts) < 2 or len(parts) > 4:
+        return False
+    return all(
+        p[0].isupper() and p.replace("-", "").replace("'", "").isalpha()
+        for p in parts
+    )
+
+
+def redact_profile(profile: dict) -> dict:
+    """
+    Return a deep copy of a Stage 1 profile with PII values redacted
+    in the top_values entries.
+    """
+    scrubbed = copy.deepcopy(profile)
+
+    for col_name, col_info in scrubbed.get("columns", {}).items():
+        top_values = col_info.get("top_values")
+        if not top_values:
+            continue
+
+        new_top: dict = {}
+        redact_idx = 0
+        for val, count in top_values.items():
+            pii_type = classify_pii(val)
+
+            # Also check for person names (not caught by regex patterns)
+            if pii_type is None and _is_person_name(val):
+                pii_type = "person_name"
+
+            if pii_type:
+                redact_idx += 1
+                new_top[f"[REDACTED_{pii_type.upper()}_{redact_idx}]"] = count
+            else:
+                new_top[val] = count
+
+        col_info["top_values"] = new_top
+
+    return scrubbed
