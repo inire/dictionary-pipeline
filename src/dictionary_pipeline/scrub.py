@@ -83,3 +83,66 @@ def strip_control_chars(value: str | None) -> str | None:
     if value is None:
         return None
     return _CONTROL_RE.sub("", value)
+
+
+def _looks_numeric(s: str) -> bool:
+    """Check if a string looks like a number (including currency and percentages)."""
+    cleaned = s.replace(",", "").replace("$", "").replace("%", "").strip()
+    if not cleaned:
+        return False
+    try:
+        float(cleaned)
+        return True
+    except ValueError:
+        return False
+
+
+def detect_header_row(path: str | Path, max_scan: int = 10) -> int:
+    """
+    Guess which row contains column headers in a CSV.
+
+    Heuristic: the header row is the first row where:
+    - It has more than 1 non-empty field
+    - The fields look like column names (not all numeric, not currency-formatted)
+    - It's not a single long sentence/description
+
+    Returns a 0-based row index suitable for pandas header= parameter.
+    """
+    path = Path(path)
+    encoding = detect_encoding(path)
+
+    lines: list[str] = []
+    with path.open("r", encoding=encoding, newline="") as f:
+        for _ in range(max_scan):
+            line = f.readline()
+            if not line:
+                break
+            lines.append(line)
+
+    if not lines:
+        return 0
+
+    for idx, line in enumerate(lines):
+        stripped = line.strip()
+
+        # Skip blank lines
+        if not stripped:
+            continue
+
+        # Parse as CSV to handle quoting
+        parsed = next(csv.reader([stripped]))
+        non_empty = [f for f in parsed if f.strip()]
+
+        # Skip lines with only 1 field (likely a title/description)
+        if len(non_empty) <= 1:
+            continue
+
+        # Skip lines where most fields are numeric (likely data, not headers)
+        numeric_count = sum(1 for f in non_empty if _looks_numeric(f.strip()))
+        if len(non_empty) > 2 and numeric_count / len(non_empty) > 0.6:
+            continue
+
+        # This looks like a header row
+        return idx
+
+    return 0

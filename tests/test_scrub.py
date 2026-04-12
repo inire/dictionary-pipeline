@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from dictionary_pipeline.scrub import detect_encoding, scan_formula_injection, strip_control_chars
+from dictionary_pipeline.scrub import detect_header_row
 
 
 def test_detect_utf8(tmp_path: Path):
@@ -65,3 +66,33 @@ def test_strip_removes_mixed_control():
 
 def test_strip_handles_none():
     assert strip_control_chars(None) is None
+
+
+def test_detect_header_standard_csv(tmp_path: Path):
+    """Row 0 is the header when it looks like column names."""
+    p = tmp_path / "standard.csv"
+    p.write_text("Name,Age,Score\nAlice,30,95\nBob,25,87\n")
+    assert detect_header_row(p) == 0
+
+
+def test_detect_header_with_preamble(tmp_path: Path):
+    """Fidelity-style: descriptive row, blank row, then headers on row 2."""
+    p = tmp_path / "preamble.csv"
+    p.write_text(textwrap.dedent('''\
+        "Positions for account Rollover IRA ...965 as of 03:17 PM ET, 2026/03/28"
+
+        "Symbol","Description","Qty","Price","Mkt Val","Asset Type",
+        "VTSAX","VANGUARD TOTAL STOCK","46.12","152.42","$7,029.61","Mutual Fund",
+    '''))
+    assert detect_header_row(p) == 2
+
+
+def test_detect_header_single_preamble_row(tmp_path: Path):
+    """One junk row then the header."""
+    p = tmp_path / "one_junk.csv"
+    p.write_text(textwrap.dedent("""\
+        Report generated 2026-03-28
+        Date,Description,Amount,Category
+        03/17/2026,STORE,41.88,Merchandise
+    """))
+    assert detect_header_row(p) == 1
