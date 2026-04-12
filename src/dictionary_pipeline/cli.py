@@ -122,6 +122,15 @@ def cmd_derive(args):
     return 0
 
 
+def cmd_bulk_intake(args):
+    from .bulk import bulk_intake_run
+    report = bulk_intake_run(args.input, args.workdir)
+    for g in report["groups"]:
+        print(f"  group_{g['group_index']}: {g['file_count']} files, "
+              f"{g['total_rows']} rows, columns: {g['columns'][:5]}{'...' if len(g['columns']) > 5 else ''}")
+    return 0
+
+
 def cmd_export(args):
     from .contract import load_contract
     workdir = Path(args.workdir)
@@ -182,6 +191,12 @@ def main(argv: list[str] | None = None) -> int:
     px.add_argument("--contract", required=True)
     px.add_argument("--output", default=None)
     px.set_defaults(func=cmd_export)
+
+    pb = sub.add_parser("bulk-intake", help="intake + profile multiple files, grouped by schema")
+    pb.add_argument("--input", required=True, nargs="+",
+                    help="input files (supports glob patterns via shell expansion)")
+    pb.add_argument("--workdir", required=True)
+    pb.set_defaults(func=cmd_bulk_intake)
 
     args = p.parse_args(argv)
     return args.func(args)
