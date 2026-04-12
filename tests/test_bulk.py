@@ -39,3 +39,27 @@ def test_groups_handle_header_detection(tmp_path: Path):
 def test_empty_glob_returns_empty():
     groups = group_by_schema([])
     assert groups == []
+
+
+import json
+
+from dictionary_pipeline.bulk import bulk_intake_run
+
+
+def test_bulk_intake_creates_per_group_workdirs(tmp_path: Path):
+    """bulk_intake_run should create a workdir per schema group."""
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "a.csv").write_text("Name,Age\nAlice,30\n")
+    (src / "b.csv").write_text("Name,Age\nBob,25\n")
+    (src / "c.csv").write_text("Date,Amount\n2026-01-01,100\n")
+
+    workdir = tmp_path / "bulk_out"
+    report = bulk_intake_run(list(src.glob("*.csv")), workdir)
+
+    assert len(report["groups"]) == 2
+    # Each group should have its own subdirectory with a manifest
+    for group in report["groups"]:
+        group_dir = Path(group["workdir"])
+        assert group_dir.exists()
+        assert (group_dir / "intake_manifest.json").exists()
