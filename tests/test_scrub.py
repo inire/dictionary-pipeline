@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from dictionary_pipeline.scrub import detect_encoding, scan_formula_injection
+from dictionary_pipeline.scrub import detect_encoding, scan_formula_injection, strip_control_chars
 
 
 def test_detect_utf8(tmp_path: Path):
@@ -49,3 +49,19 @@ def test_scan_clean_file_returns_empty(tmp_path: Path):
     p.write_text("Name,Age\nAlice,30\nBob,25\n")
     hits = scan_formula_injection(p)
     assert hits == []
+
+
+def test_strip_removes_null_bytes():
+    assert strip_control_chars("hello\x00world") == "helloworld"
+
+
+def test_strip_preserves_newlines_and_tabs():
+    assert strip_control_chars("hello\tworld\n") == "hello\tworld\n"
+
+
+def test_strip_removes_mixed_control():
+    assert strip_control_chars("a\x01b\x02c\x7fd") == "abcd"
+
+
+def test_strip_handles_none():
+    assert strip_control_chars(None) is None

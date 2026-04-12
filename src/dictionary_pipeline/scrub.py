@@ -72,3 +72,14 @@ def scan_formula_injection(
                     hits.append({"row": row_idx, "col": col, "value": value.strip()})
 
     return hits
+
+
+# Control characters to remove. We keep \t (0x09), \n (0x0a), \r (0x0d).
+_CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
+
+def strip_control_chars(value: str | None) -> str | None:
+    """Remove ASCII control characters except tab, newline, carriage return."""
+    if value is None:
+        return None
+    return _CONTROL_RE.sub("", value)
