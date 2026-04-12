@@ -20,6 +20,7 @@ from typing import Any
 import pandas as pd
 
 from ..logging import TransformationLog
+from ..scrub import detect_encoding, detect_header_row
 
 
 _EXCEL_SUFFIXES = {".xlsx", ".xls", ".xlsm", ".xlsb", ".ods"}
@@ -27,11 +28,31 @@ _CSV_SUFFIXES = {".csv"}
 _TSV_SUFFIXES = {".tsv", ".tab"}
 
 
+def _raw_to_pandas_header(path: Path, raw_idx: int, encoding: str) -> int:
+    """
+    Convert a raw file line index (as returned by detect_header_row) to the
+    pandas ``header=`` value.
+
+    pandas skips blank lines when resolving the header row, so a raw index of
+    N that has B blank lines before it requires ``header = N - B`` for pandas
+    to land on the correct row.
+    """
+    lines: list[str] = []
+    with path.open("r", encoding=encoding, newline="") as f:
+        for _ in range(raw_idx):
+            line = f.readline()
+            if not line:
+                break
+            lines.append(line)
+    blank_count = sum(1 for line in lines if not line.strip())
+    return raw_idx - blank_count
+
+
 def read_source(
     path: str | Path,
     *,
     sheet_name: str | int = 0,
-    header_row: int = 0,
+    header_row: int | str = 0,
     nrows: int | None = None,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     """
@@ -46,19 +67,38 @@ def read_source(
 
     if suffix in _CSV_SUFFIXES:
         reader = "pandas.read_csv"
-        params: dict[str, Any] = {"header": header_row}
+        encoding = detect_encoding(path)
+
+        actual_header: int
+        if header_row == "auto":
+            raw = detect_header_row(path)
+            actual_header = _raw_to_pandas_header(path, raw, encoding)
+        else:
+            actual_header = header_row  # type: ignore[assignment]
+
+        params: dict[str, Any] = {"header": actual_header, "encoding": encoding}
         if nrows is not None:
             params["nrows"] = nrows
         df = pd.read_csv(path, **params)
     elif suffix in _TSV_SUFFIXES:
         reader = "pandas.read_csv"
-        params = {"header": header_row, "sep": "\t"}
+        encoding = detect_encoding(path)
+
+        actual_header2: int
+        if header_row == "auto":
+            raw = detect_header_row(path)
+            actual_header2 = _raw_to_pandas_header(path, raw, encoding)
+        else:
+            actual_header2 = header_row  # type: ignore[assignment]
+
+        params = {"header": actual_header2, "sep": "\t", "encoding": encoding}
         if nrows is not None:
             params["nrows"] = nrows
         df = pd.read_csv(path, **params)
     elif suffix in _EXCEL_SUFFIXES:
         reader = "pandas.read_excel"
-        params = {"sheet_name": sheet_name, "header": header_row}
+        actual_header = 0 if header_row == "auto" else header_row
+        params = {"sheet_name": sheet_name, "header": actual_header}
         if nrows is not None:
             params["nrows"] = nrows
         df = pd.read_excel(path, **params)
@@ -75,7 +115,7 @@ def run(
     source_path: str | Path,
     workdir: str | Path,
     sheet_name: str | int = 0,
-    header_row: int = 0,
+    header_row: int | str = 0,
     nrows: int | None = None,
     log: TransformationLog | None = None,
 ) -> tuple[pd.DataFrame, dict]:
