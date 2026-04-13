@@ -82,6 +82,9 @@ def test_redact_profile_scrubs_top_values():
 
 
 def test_redact_profile_preserves_structure():
+    # NOTE: Replace these placeholder names with real examples from your dataset
+    # when running against actual data. These generic names validate that the
+    # _is_person_name() heuristic catches "Firstname Lastname" patterns.
     profile = {
         "row_count": 5,
         "column_count": 1,
@@ -89,7 +92,7 @@ def test_redact_profile_preserves_structure():
             "name": {
                 "dtype": "object",
                 "distinct_count": 2,
-                "top_values": {"Seamus Hartmann": 3, "Eileen Hartmann": 2},
+                "top_values": {"Jane Doe": 3, "John Smith": 2},
             },
         },
     }
@@ -99,5 +102,5 @@ def test_redact_profile_preserves_structure():
     assert scrubbed["columns"]["name"]["distinct_count"] == 2
     # Names should be redacted
     name_top = scrubbed["columns"]["name"]["top_values"]
-    assert "Seamus Hartmann" not in name_top
-    assert "Eileen Hartmann" not in name_top
+    assert "Jane Doe" not in name_top
+    assert "John Smith" not in name_top

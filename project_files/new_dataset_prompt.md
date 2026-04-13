@@ -9,12 +9,12 @@ Copy this template, fill in the blanks, and paste it into a Claude Code session 
 ```
 I have a new dataset to run through the dictionary-pipeline.
 
-**File:** <full path to the file, e.g. D:/AI/Claude/My Export 2025.csv>
+**File:** <full path to the file, e.g. <your-workdir>/My Export 2025.csv>
 **What it is:** <one sentence — what this data represents and where it came from>
 **Grain:** <one row per WHAT? e.g. "one row per purchased item per order">
 **PII concerns:** <any columns with personal data, or "none">
 **Known quirks:** <anything unusual — footer rows, preamble headers, date formats, ID artifacts, or "none that I know of">
-**Workdir:** <where to put run artifacts, OUTSIDE the repo, e.g. D:/AI/Claude/myrun_1>
+**Workdir:** <where to put run artifacts, OUTSIDE the repo, e.g. <your-workdir>/myrun_1>
 
 Run the dictionary-pipeline on this file. Follow the stages in order:
 
@@ -50,12 +50,12 @@ References:
 
 | Field | What to write | Example |
 |---|---|---|
-| **File** | Absolute path. Any format the pipeline supports (.csv, .tsv, .xlsx, .xls, etc.) | `D:/AI/Claude/Instacart 2025 Purchased Items.csv` |
+| **File** | Absolute path. Any format the pipeline supports (.csv, .tsv, .xlsx, .xls, etc.) | `<your-workdir>/Instacart 2025 Purchased Items.csv` |
 | **What it is** | One sentence. Mention the source and time period. | `My Instacart purchase history for calendar year 2025, exported from my account.` |
 | **Grain** | The unit of one row. This prevents the most common analytical error. | `one row per purchased item per order` |
 | **PII concerns** | Column names or "none". Gets flagged in dictionary + dataset.pii_fields. | `Shipping Address column has my home address` |
 | **Known quirks** | Anything you noticed opening the file. Or "none" — the profile will catch most issues. | `Last 2 rows are a totals footer, not data. Order IDs have a leading apostrophe.` |
-| **Workdir** | A path OUTSIDE the git repo, so run artifacts don't pollute version control. | `D:/AI/Claude/instacart_run_1` |
+| **Workdir** | A path OUTSIDE the git repo, so run artifacts don't pollute version control. | `<your-workdir>/instacart_run_1` |
 
 ## What to expect
 
