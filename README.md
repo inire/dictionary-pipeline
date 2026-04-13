@@ -1,6 +1,6 @@
 # dictionary-pipeline
 
-A pandas-first data preparation pipeline where the **data dictionary is the contract**. Excel only at the boundaries — `.xlsx` in for intake, `.xlsx` out for delivery, deterministic Python in between. LLM calls are scoped to the two stages where judgment actually matters (drafting the dictionary, normalizing ambiguous values), and the dictionary itself is enforced mechanically by pandera so an LLM never silently drifts the data.
+A pandas-first data preparation pipeline where the **data dictionary is the contract**. Tabular files in for intake (CSV, TSV, Excel), `.xlsx` out for delivery, deterministic Python in between. LLM calls are scoped to the two stages where judgment actually matters (drafting the dictionary, normalizing ambiguous values), and the dictionary itself is enforced mechanically by pandera so an LLM never silently drifts the data.
 
 ## Why this exists
 
@@ -46,36 +46,44 @@ Optional extras:
 
 ## Quickstart
 
-End-to-end run on the bundled DoorDash example:
-
 ```bash
 dictionary-pipeline run \
-  --input examples/doordash/DoorDash_2026_Purchased_Items.xlsx \
-  --contract examples/doordash/dictionary.yaml \
-  --workdir runs/doordash \
-  --sheet "DoorDash 2026 Purchased Items"
+  --input path/to/your_data.xlsx \
+  --contract path/to/dictionary.yaml \
+  --workdir runs/my_run \
+  --sheet "Sheet1"
 ```
+
+The pipeline accepts CSV, TSV, and Excel files. For CSVs, encoding and header row are auto-detected.
 
 Output:
 
 ```
-[s0] intake: examples/doordash/DoorDash_2026_Purchased_Items.xlsx
+[s0] intake: path/to/your_data.xlsx
      loaded 532 rows x 13 cols
 [s1] profiling...
-[s4] enforcing schema from examples/doordash/dictionary.yaml
+[s4] enforcing schema from path/to/dictionary.yaml
      validated 532 rows against 13 fields
 [s5] cleaning (rule-based)...
 [s7] deriving 3 columns...
 [s8] validating final output...
      schema: passed | drift columns: none
 [s9] exporting workbook...
-     wrote runs/doordash/doordash_2026_purchased_items.xlsx
+     wrote runs/my_run/your_data.xlsx
 ```
 
 The output workbook contains three tabs:
-- **doordash_2026_purchased_items** — the cleaned data with derived columns
+- **your_data** — the cleaned data with derived columns
 - **Data Dictionary** — rendered from `dictionary.yaml`
 - **Automated Changes** — every transformation logged with timestamps
+
+For bulk intake of multiple files (grouped by schema automatically):
+
+```bash
+dictionary-pipeline bulk-intake \
+  --input path/to/exports/*.csv \
+  --workdir runs/bulk_run
+```
 
 ## Stage-by-stage usage
 
@@ -95,12 +103,15 @@ Stage state is checkpointed to parquet files between stages, so you can iterate 
 
 ```
 src/dictionary_pipeline/
+├── bulk.py              # multi-file schema grouping + bulk intake orchestration
 ├── contract.py          # YAML <-> pandera schema bridge, derivation engine
 ├── logging.py           # JSONL transformation log
 ├── cli.py               # argparse entry point
+├── pii.py               # PII detection (regex) + profile redaction
+├── scrub.py             # encoding detection, formula injection scan, header detection
 └── stages/
-    ├── s0_intake.py     # archive original, load, manifest
-    ├── s1_profile.py    # deterministic profile (replaces /audit-xls)
+    ├── s0_intake.py     # archive original, load, manifest (auto-encoding, auto-header)
+    ├── s1_profile.py    # deterministic profile with optional PII redaction
     ├── s3_dictionary.py # STUB — Claude API: draft dictionary
     ├── s4_enforce.py    # pandera validation + coercion
     ├── s5_clean.py      # rule-based cleaning
@@ -122,7 +133,9 @@ The prompts themselves are defined as `PROMPT_TEMPLATE` constants at the top of 
 pytest tests/ -v
 ```
 
-The contract layer has 7 tests covering load, schema construction, validation pass/fail, derivations, and column rename. Add tests for your custom derivation patterns as you register them in `contract.apply_derivations()`.
+The test suite has 48 tests covering the contract layer (load, schema, validation, derivations, rename), intake (CSV/TSV/encoding/header detection), PII detection and profile redaction, bulk schema grouping, and scrub utilities. Add tests for your custom derivation patterns as you register them in `contract.apply_derivations()`.
+
+> **Note:** The `examples/` directory is not included in this repository. Some contract tests (`test_contract.py`) expect example dictionaries at `examples/doordash/` and `examples/instacart/`. To run those tests, create your own example datasets and dictionaries following the format in `project_files/dictionary_contract_format.md`.
 
 ## Adding a new derivation pattern
 
