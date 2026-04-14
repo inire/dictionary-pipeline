@@ -30,10 +30,13 @@ _ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
 # Unanchored versions for substring scanning inside free text.
-# Use word boundaries and exclude ISO dates from phone matches.
+# Use word boundaries so matches stop at non-identifier characters.
+# Note: partial_account from _PATTERNS is intentionally omitted — its
+# anchored pattern (^[.*]{2,}\d{3,}$) doesn't adapt to substring scanning
+# without producing false positives on any "... NNN" sequence in prose.
 _SCAN_PATTERNS: list[tuple[str, re.Pattern]] = [
     ("ssn", re.compile(r"\b\d{3}-\d{2}-\d{4}\b")),
-    ("email", re.compile(r"\b[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z]{2,}\b")),
+    ("email", re.compile(r"\b[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)*\.[a-zA-Z]{2,}\b")),
     ("credit_card", re.compile(r"\b\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}\b")),
     ("partial_card", re.compile(r"(?:ending|last\s*4|card)\s*(?:in\s*)?\d{4}", re.IGNORECASE)),
     ("phone", re.compile(r"\b\+?\d{3}[\s.-]?\d{3}[\s.-]?\d{4}\b")),
@@ -56,7 +59,10 @@ def find_pii(text: str | None) -> list[tuple[str, str]]:
     for pii_type, pattern in _SCAN_PATTERNS:
         for m in pattern.finditer(text):
             matched = m.group(0)
-            # Guard: phone must have at least 7 digits and not be an ISO date
+            # Guard: phone must have at least 7 digits. The ISO-date check
+            # is defensive parity with classify_pii — the phone regex needs
+            # 10 digits and ISO dates only have 8, so this branch is currently
+            # unreachable but kept to prevent drift if either pattern changes.
             if pii_type == "phone":
                 if len(_DIGIT_RE.findall(matched)) < 7:
                     continue

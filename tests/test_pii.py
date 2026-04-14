@@ -142,3 +142,15 @@ def test_find_pii_ignores_iso_dates():
     findings = find_pii("Updated 2026-04-14 per policy.")
     # ISO date should not be classified as phone
     assert not any(t == "phone" for t, _ in findings)
+
+
+def test_find_pii_captures_full_multi_dot_email():
+    findings = find_pii("Escalate to alice+tag@example.co.uk for appeals.")
+    # Ensure the full email (including both TLD components) is captured,
+    # not truncated at the first dot after @.
+    assert ("email", "alice+tag@example.co.uk") in findings
+
+
+def test_find_pii_captures_full_simple_email():
+    findings = find_pii("Contact jane@example.com for help.")
+    assert ("email", "jane@example.com") in findings
