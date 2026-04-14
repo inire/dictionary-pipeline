@@ -131,6 +131,26 @@ def cmd_bulk_intake(args):
     return 0
 
 
+def cmd_community_export(args):
+    from .community import community_export, UnsafeContractError
+    try:
+        result = community_export(
+            args.contract,
+            args.output_dir,
+            force=args.force,
+        )
+    except UnsafeContractError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 2
+
+    print(f"wrote {result['yaml_path']}")
+    print(f"wrote {result['md_path']}")
+    report = result["scan_report"]
+    if not report.is_safe:
+        print(f"  scan: {report.summary()} (sanitized before write)")
+    return 0
+
+
 def cmd_export(args):
     from .contract import load_contract
     workdir = Path(args.workdir)
@@ -197,6 +217,14 @@ def main(argv: list[str] | None = None) -> int:
                     help="input files (supports glob patterns via shell expansion)")
     pb.add_argument("--workdir", required=True)
     pb.set_defaults(func=cmd_bulk_intake)
+
+    pc = sub.add_parser("community-export",
+                        help="produce a PII-scrubbed community-safe dictionary bundle")
+    pc.add_argument("--contract", required=True)
+    pc.add_argument("--output-dir", required=True, dest="output_dir")
+    pc.add_argument("--force", action="store_true",
+                    help="proceed even if pre-sanitization scan finds PII")
+    pc.set_defaults(func=cmd_community_export)
 
     args = p.parse_args(argv)
     return args.func(args)
