@@ -164,7 +164,7 @@ Data dictionaries for common datasets (bank exports, retailer order history, etc
 
 ```bash
 # Copy the contract next to your own data
-cp community/shopping_orders/dictionary.yaml my_run/
+cp community/_template/dictionary.yaml my_run/
 
 # Run the pipeline as usual
 dictionary-pipeline run \
