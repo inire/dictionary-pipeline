@@ -22,10 +22,11 @@ from __future__ import annotations
 
 import copy
 from dataclasses import dataclass, field as dc_field
+from pathlib import Path
 
 import yaml
 
-from .contract import Contract, FieldSpec
+from .contract import Contract, FieldSpec, load_contract
 from .pii import classify_pii, find_pii
 
 
@@ -325,3 +326,64 @@ def render_community_markdown(contract: Contract) -> str:
         lines.append("")
 
     return "\n".join(lines)
+
+
+class UnsafeContractError(Exception):
+    """Raised when a contract fails the pre-export PII scan."""
+
+
+def community_export(
+    contract_path: str | Path,
+    output_dir: str | Path,
+    *,
+    force: bool = False,
+) -> dict:
+    """
+    Produce a community-safe dictionary bundle.
+
+    Reads a contract YAML, scans it for PII, sanitizes it, and writes:
+      - {output_dir}/dictionary.yaml
+      - {output_dir}/README.md
+
+    Parameters
+    ----------
+    contract_path : path to the source dictionary.yaml
+    output_dir    : directory to write the sanitized bundle into
+    force         : if True, proceed even if scan finds PII (after sanitization)
+
+    Raises
+    ------
+    UnsafeContractError : if scan finds PII and force=False
+
+    Returns
+    -------
+    dict with keys: yaml_path, md_path, scan_report (SafetyReport)
+    """
+    contract_path = Path(contract_path)
+    output_dir = Path(output_dir)
+
+    contract = load_contract(contract_path)
+    report = scan_contract(contract)
+
+    if not report.is_safe and not force:
+        raise UnsafeContractError(
+            f"Contract {contract_path} failed PII scan: {report.summary()}. "
+            f"Either fix the findings, set shareable=false on affected fields, "
+            f"provide community_notes overrides, or re-run with force=True "
+            f"(sanitization will still be applied)."
+        )
+
+    sanitized = sanitize_contract(contract)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    yaml_path = output_dir / "dictionary.yaml"
+    yaml_path.write_text(dump_contract_yaml(sanitized), encoding="utf-8")
+
+    md_path = output_dir / "README.md"
+    md_path.write_text(render_community_markdown(sanitized), encoding="utf-8")
+
+    return {
+        "yaml_path": yaml_path,
+        "md_path": md_path,
+        "scan_report": report,
+    }

@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import pytest
+
 from dictionary_pipeline.community import (
     SafetyReport,
+    UnsafeContractError,
+    community_export,
     dump_contract_yaml,
     render_community_markdown,
     sanitize_contract,
@@ -276,3 +280,104 @@ def test_render_markdown_omits_derived_section_when_empty():
     contract = _mk_contract([])
     md = render_community_markdown(contract)
     assert "## Derived fields" not in md
+
+
+def test_community_export_writes_yaml_and_markdown(tmp_path):
+    contract_yaml = tmp_path / "dictionary.yaml"
+    contract_yaml.write_text("""
+dataset:
+  name: shopping_orders
+  description: Shopping order history
+  source: Retailer CSV export
+  grain: one row per order
+  pii: false
+  pii_fields: []
+  naming_convention: snake_case
+  last_updated: "2026-04-14"
+  community_version: "1.0.0"
+
+fields:
+  - name: order_id
+    label: Order ID
+    type: identifier
+    dtype: string
+    nullable: false
+    notes: Unique per order
+  - name: total
+    label: Total
+    type: decimal
+    dtype: float64
+    nullable: false
+    notes: Order total in USD
+""")
+
+    out_dir = tmp_path / "out"
+    community_export(contract_yaml, out_dir)
+
+    assert (out_dir / "dictionary.yaml").exists()
+    assert (out_dir / "README.md").exists()
+
+    md_body = (out_dir / "README.md").read_text()
+    assert "shopping_orders" in md_body
+    assert "order_id" in md_body
+    assert "Order total in USD" in md_body
+
+
+def test_community_export_rejects_unsafe_contract(tmp_path):
+    contract_yaml = tmp_path / "dictionary.yaml"
+    contract_yaml.write_text("""
+dataset:
+  name: leaky
+  description: test
+  source: test
+  grain: one row per thing
+  pii: false
+  pii_fields: []
+  naming_convention: snake_case
+  last_updated: "2026-04-14"
+
+fields:
+  - name: contact
+    label: Contact
+    type: text
+    dtype: string
+    nullable: true
+    notes: "Email support at jane@example.com"
+""")
+
+    out_dir = tmp_path / "out"
+    with pytest.raises(UnsafeContractError) as exc:
+        community_export(contract_yaml, out_dir, force=False)
+    assert "email" in str(exc.value).lower()
+
+
+def test_community_export_force_bypasses_safety_check(tmp_path, capsys):
+    contract_yaml = tmp_path / "dictionary.yaml"
+    contract_yaml.write_text("""
+dataset:
+  name: leaky
+  description: test
+  source: test
+  grain: one row per thing
+  pii: false
+  pii_fields: []
+  naming_convention: snake_case
+  last_updated: "2026-04-14"
+
+fields:
+  - name: contact
+    label: Contact
+    type: text
+    dtype: string
+    nullable: true
+    notes: "Email support at jane@example.com"
+""")
+
+    out_dir = tmp_path / "out"
+    # With force=True, we sanitize and write even though there are findings
+    community_export(contract_yaml, out_dir, force=True)
+
+    md_body = (out_dir / "README.md").read_text()
+    # Sanitization should have replaced the email
+    assert "jane@example.com" not in md_body
+    assert "[REDACTED_EMAIL]" in md_body
