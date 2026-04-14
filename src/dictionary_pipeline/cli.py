@@ -49,7 +49,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     archive = manifest["archive_path"]
 
     print("[s1] profiling...")
-    s1_profile.run(df, workdir, log=log)
+    s1_profile.run(df, workdir, log=log, redact_pii=args.redact_pii)
 
     print(f"[s4] enforcing schema from {args.contract}")
     df, contract = s4_enforce.run(df, args.contract, workdir, log=log)
@@ -97,7 +97,9 @@ def cmd_intake(args):
 def cmd_profile(args):
     workdir = Path(args.workdir)
     df = pd.read_parquet(workdir / "stage0_df.parquet")
-    summary = s1_profile.run(df, workdir, log=_log(workdir))
+    summary = s1_profile.run(
+        df, workdir, log=_log(workdir), redact_pii=args.redact_pii
+    )
     print(json.dumps(summary, indent=2, default=str))
     return 0
 
@@ -180,6 +182,8 @@ def main(argv: list[str] | None = None) -> int:
     pr.add_argument("--nrows", type=int, default=None,
                     help="Maximum number of data rows to read (default: all)")
     pr.add_argument("--output", default=None)
+    pr.add_argument("--redact-pii", action="store_true", dest="redact_pii",
+                    help="replace PII values in Stage 1 profile top_values")
     pr.set_defaults(func=cmd_run)
 
     pi = sub.add_parser("intake")
@@ -194,6 +198,8 @@ def main(argv: list[str] | None = None) -> int:
 
     pp = sub.add_parser("profile")
     pp.add_argument("--workdir", required=True)
+    pp.add_argument("--redact-pii", action="store_true", dest="redact_pii",
+                    help="replace PII values in top_values with [REDACTED_*] placeholders")
     pp.set_defaults(func=cmd_profile)
 
     pe = sub.add_parser("enforce")
