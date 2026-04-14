@@ -1,0 +1,22 @@
+dataset:
+  name: example_dataset
+  description: One-sentence description of what this dataset is.
+  source: Where the source file comes from (e.g., "Bank X monthly CSV export")
+  grain: "one row per WHAT? be explicit"
+  pii: false
+  pii_fields: []
+  naming_convention: snake_case
+  last_updated: "YYYY-MM-DD"
+  community_version: "0.1.0"
+
+fields:
+  - name: field_name
+    label: Human-readable label
+    type: text  # or categorical, decimal, date, identifier, integer, bool
+    dtype: string  # pandas dtype
+    nullable: false
+    notes: |
+      Generic description of the field, safe for anyone.
+      Avoid referencing real values, household members, or specific merchants.
+
+derived_fields: []
