@@ -21,7 +21,6 @@ contain real user data. This module separates the two:
 from __future__ import annotations
 
 from dataclasses import dataclass, field as dc_field
-from typing import Any
 
 from .contract import Contract, FieldSpec
 from .pii import classify_pii, find_pii
@@ -77,7 +76,7 @@ def _scan_field_allowed_values(f: FieldSpec, report: SafetyReport) -> None:
         if pii_type:
             report.add(f"field.{f.name}.allowed_values", pii_type, val)
             continue
-        # Also scan for embedded PII (e.g., "Visa ending 4122")
+        # Also scan for embedded PII (e.g., "contact jane@example.com")
         for pii_type, matched in find_pii(val):
             report.add(f"field.{f.name}.allowed_values", pii_type, matched)
 

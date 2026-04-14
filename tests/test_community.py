@@ -2,11 +2,6 @@
 
 from __future__ import annotations
 
-import tempfile
-from pathlib import Path
-
-import pytest
-
 from dictionary_pipeline.community import SafetyReport, scan_contract
 from dictionary_pipeline.contract import Contract, FieldSpec
 
@@ -78,3 +73,43 @@ def test_scan_contract_skips_non_shareable_fields():
     report = scan_contract(_mk_contract(fields))
     # Non-shareable fields are dropped, not scanned
     assert report.is_safe is True
+
+
+def test_scan_contract_finds_embedded_email_in_allowed_values():
+    """Allowed_values that embed PII inside longer text should be caught by find_pii."""
+    fields = [
+        FieldSpec(name="src", label="Src", type="categorical", dtype="string",
+                  allowed_values=["contact jane@example.com"]),
+    ]
+    report = scan_contract(_mk_contract(fields))
+    assert any(f.pii_type == "email" for f in report.findings)
+
+
+def test_safety_report_summary_when_safe():
+    assert SafetyReport().summary() == "Safe (no PII detected)"
+
+
+def test_safety_report_summary_aggregates_by_type():
+    r = SafetyReport()
+    r.add("field.a.notes", "email", "x@y.com")
+    r.add("field.b.notes", "email", "z@w.com")
+    r.add("field.c.notes", "phone", "555-123-4567")
+    s = r.summary()
+    assert "email:2" in s
+    assert "phone:1" in s
+    assert s.startswith("Unsafe")
+
+
+def test_scan_contract_finds_pii_in_community_notes():
+    """PII in the community_notes override field should also be detected."""
+    fields = [
+        FieldSpec(name="contact", label="Contact", type="text", dtype="string",
+                  notes="Customer contact field.",
+                  community_notes="See jane@example.com for questions."),
+    ]
+    report = scan_contract(_mk_contract(fields))
+    assert report.is_safe is False
+    assert any(
+        f.pii_type == "email" and f.location == "field.contact.community_notes"
+        for f in report.findings
+    )
