@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
-from dictionary_pipeline.community import SafetyReport, scan_contract, scan_profile
+from dictionary_pipeline.community import (
+    SafetyReport,
+    sanitize_contract,
+    scan_contract,
+    scan_profile,
+)
 from dictionary_pipeline.contract import Contract, FieldSpec
 
 
@@ -150,3 +155,61 @@ def test_scan_profile_detects_email_in_top_values():
 
 def test_scan_profile_handles_missing_columns_key():
     assert scan_profile({}).is_safe is True
+
+
+def test_sanitize_drops_non_shareable_fields():
+    fields = [
+        FieldSpec(name="keep", label="Keep", type="text", dtype="string"),
+        FieldSpec(name="drop", label="Drop", type="text", dtype="string", shareable=False),
+    ]
+    sanitized = sanitize_contract(_mk_contract(fields))
+    assert len(sanitized.fields) == 1
+    assert sanitized.fields[0].name == "keep"
+
+
+def test_sanitize_uses_community_notes_when_set():
+    fields = [
+        FieldSpec(
+            name="foo", label="Foo", type="text", dtype="string",
+            notes="Real notes with jane@example.com",
+            community_notes="Generic description",
+        ),
+    ]
+    sanitized = sanitize_contract(_mk_contract(fields))
+    assert sanitized.fields[0].notes == "Generic description"
+    assert sanitized.fields[0].community_notes == ""
+
+
+def test_sanitize_strips_pii_from_notes_when_no_community_notes():
+    fields = [
+        FieldSpec(
+            name="foo", label="Foo", type="text", dtype="string",
+            notes="Contact jane@example.com for details. Card ending 4122 was used.",
+        ),
+    ]
+    sanitized = sanitize_contract(_mk_contract(fields))
+    out = sanitized.fields[0].notes
+    assert "jane@example.com" not in out
+    assert "4122" not in out
+    assert "[REDACTED_EMAIL]" in out
+    assert "[REDACTED_PARTIAL_CARD]" in out
+
+
+def test_sanitize_preserves_clean_notes_verbatim():
+    fields = [
+        FieldSpec(name="foo", label="Foo", type="text", dtype="string",
+                  notes="Transaction amount in USD, always positive."),
+    ]
+    sanitized = sanitize_contract(_mk_contract(fields))
+    assert sanitized.fields[0].notes == "Transaction amount in USD, always positive."
+
+
+def test_sanitize_scrubs_allowed_values_pii():
+    fields = [
+        FieldSpec(name="payment", label="Payment", type="categorical", dtype="string",
+                  allowed_values=["Visa ending 4122", "Mastercard ending 3854"]),
+    ]
+    sanitized = sanitize_contract(_mk_contract(fields))
+    # Partial-card values should be replaced with a summary count
+    assert sanitized.fields[0].allowed_values is None
+    assert "2 unique" in (sanitized.fields[0].notes or "")

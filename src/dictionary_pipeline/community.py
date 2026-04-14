@@ -20,6 +20,7 @@ contain real user data. This module separates the two:
 
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass, field as dc_field
 
 from .contract import Contract, FieldSpec
@@ -116,3 +117,63 @@ def scan_profile(profile: dict) -> SafetyReport:
             if pii_type:
                 report.add(f"profile.columns.{col_name}.top_values", pii_type, val)
     return report
+
+
+def _redact_text(text: str) -> str:
+    """Replace PII substrings in free-text with [REDACTED_TYPE] placeholders."""
+    if not text:
+        return text
+    findings = find_pii(text)
+    # Longest-first so we don't double-replace substrings
+    findings.sort(key=lambda f: len(f[1]), reverse=True)
+    out = text
+    for pii_type, matched in findings:
+        out = out.replace(matched, f"[REDACTED_{pii_type.upper()}]")
+    return out
+
+
+def _has_allowed_values_pii(values: list) -> bool:
+    """True if any string value looks like PII."""
+    for v in values:
+        if not isinstance(v, str):
+            continue
+        if classify_pii(v):
+            return True
+        if find_pii(v):
+            return True
+    return False
+
+
+def sanitize_contract(contract: Contract) -> Contract:
+    """
+    Return a deep-copied contract with PII scrubbed for community sharing.
+
+    Rules applied:
+      1. Fields with shareable=False are dropped entirely.
+      2. If community_notes is set, it REPLACES notes (and community_notes is cleared).
+      3. Otherwise, PII substrings in notes are replaced with [REDACTED_TYPE].
+      4. Allowed_values containing PII are replaced with a count summary in notes.
+      5. source_column is cleared (may contain user-specific header text).
+    """
+    sanitized = copy.deepcopy(contract)
+    sanitized.fields = [f for f in sanitized.fields if f.shareable]
+
+    for f in sanitized.fields:
+        # Rule 2/3: notes
+        if f.community_notes:
+            f.notes = f.community_notes
+            f.community_notes = ""
+        else:
+            f.notes = _redact_text(f.notes)
+
+        # Rule 4: allowed_values PII
+        if f.allowed_values and _has_allowed_values_pii(f.allowed_values):
+            count = len(f.allowed_values)
+            note_prefix = f"{count} unique values (redacted for community safety)."
+            f.notes = f"{note_prefix} {f.notes}".strip()
+            f.allowed_values = None
+
+        # Rule 5: source_column
+        f.source_column = None
+
+    return sanitized
