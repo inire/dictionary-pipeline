@@ -266,3 +266,58 @@ def test_instacart_derivations_against_engine():
     assert out.loc[0, "order_item_count"] == 2
     assert out.loc[0, "order_total"] == 15.0
     assert out.loc[2, "order_total"] == 20.0
+
+
+from dictionary_pipeline.contract import FieldSpec, Contract, load_contract
+import tempfile
+from pathlib import Path
+
+
+def test_fieldspec_defaults_shareable_true():
+    f = FieldSpec(
+        name="foo",
+        label="Foo",
+        type="text",
+        dtype="string",
+    )
+    assert f.shareable is True
+    assert f.community_notes == ""
+
+
+def test_load_contract_respects_shareable_flag():
+    yaml_body = """
+dataset:
+  name: test_ds
+  description: test
+  source: test
+  grain: one row per thing
+  pii: false
+  pii_fields: []
+  naming_convention: snake_case
+  last_updated: "2026-04-14"
+
+fields:
+  - name: field_a
+    label: A
+    type: text
+    dtype: string
+    nullable: false
+    shareable: false
+  - name: field_b
+    label: B
+    type: text
+    dtype: string
+    nullable: false
+    community_notes: "Generic description for community sharing"
+"""
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+        f.write(yaml_body)
+        path = f.name
+
+    contract = load_contract(path)
+    field_a = contract.field_by_name("field_a")
+    field_b = contract.field_by_name("field_b")
+
+    assert field_a.shareable is False
+    assert field_b.shareable is True
+    assert field_b.community_notes == "Generic description for community sharing"

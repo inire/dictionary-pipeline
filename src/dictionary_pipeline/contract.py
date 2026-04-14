@@ -45,6 +45,8 @@ class FieldSpec:
     pii: bool = False
     reliability: str = "reliable"
     parse_format: str | None = None
+    shareable: bool = True
+    community_notes: str = ""
 
 
 @dataclass
