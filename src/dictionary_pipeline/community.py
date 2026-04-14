@@ -23,6 +23,8 @@ from __future__ import annotations
 import copy
 from dataclasses import dataclass, field as dc_field
 
+import yaml
+
 from .contract import Contract, FieldSpec
 from .pii import classify_pii, find_pii
 
@@ -177,3 +179,149 @@ def sanitize_contract(contract: Contract) -> Contract:
         f.source_column = None
 
     return sanitized
+
+
+# Default values that should not appear in the dumped YAML
+_FIELD_DEFAULTS = {
+    "nullable": False,
+    "allowed_values": None,
+    "min": None,
+    "max": None,
+    "pattern": None,
+    "null_tolerance": 0.0,
+    "source_column": None,
+    "notes": "",
+    "review_status": "draft",
+    "pii": False,
+    "reliability": "reliable",
+    "parse_format": None,
+    "shareable": True,
+    "community_notes": "",
+}
+
+_DERIVED_DEFAULTS = {
+    "notes": "",
+    "review_status": "draft",
+}
+
+
+def _field_to_dict(f: FieldSpec) -> dict:
+    """Convert a FieldSpec to a dict, omitting default values."""
+    out = {"name": f.name, "label": f.label, "type": f.type, "dtype": f.dtype}
+    for key, default in _FIELD_DEFAULTS.items():
+        val = getattr(f, key)
+        if val != default:
+            out[key] = val
+    return out
+
+
+def _derived_to_dict(d) -> dict:
+    out = {
+        "name": d.name,
+        "label": d.label,
+        "type": d.type,
+        "dtype": d.dtype,
+        "transformation": d.transformation,
+    }
+    for key, default in _DERIVED_DEFAULTS.items():
+        val = getattr(d, key)
+        if val != default:
+            out[key] = val
+    return out
+
+
+def dump_contract_yaml(contract: Contract) -> str:
+    """
+    Serialize a Contract to a YAML string suitable for a community dictionary.
+
+    Omits fields with default values and drops the shareable/community_notes
+    flags (they're tooling-only, not part of the community artifact).
+    """
+    dataset = {
+        "name": contract.dataset_name,
+        "description": contract.description,
+        "source": contract.source,
+        "grain": contract.grain,
+        "pii": contract.pii,
+        "pii_fields": contract.pii_fields,
+        "naming_convention": contract.naming_convention,
+        "last_updated": contract.last_updated,
+    }
+    if contract.community_version:
+        dataset["community_version"] = contract.community_version
+
+    data: dict = {
+        "dataset": dataset,
+        "fields": [_field_to_dict(f) for f in contract.fields],
+    }
+    if contract.derived_fields:
+        data["derived_fields"] = [_derived_to_dict(d) for d in contract.derived_fields]
+
+    return yaml.safe_dump(data, sort_keys=False, width=100)
+
+
+def render_community_markdown(contract: Contract) -> str:
+    """
+    Render a community dictionary as a human-readable markdown file.
+
+    Structure:
+      # <dataset_name>
+      <description>
+
+      **Source:** ...
+      **Grain:** ...
+      **Community version:** <version> (if set)
+      **Last updated:** ...
+
+      ## Fields
+      | name | label | type | nullable | notes |
+
+      ## Derived fields   (only if present)
+      | name | transformation | notes |
+    """
+    lines: list[str] = []
+    lines.append(f"# {contract.dataset_name}")
+    lines.append("")
+    if contract.description:
+        lines.append(contract.description)
+        lines.append("")
+
+    meta: list[str] = []
+    if contract.source:
+        meta.append(f"**Source:** {contract.source}")
+    if contract.grain:
+        meta.append(f"**Grain:** {contract.grain}")
+    if contract.community_version:
+        meta.append(f"**Community version:** {contract.community_version}")
+    if contract.last_updated:
+        meta.append(f"**Last updated:** {contract.last_updated}")
+    if meta:
+        lines.extend(meta)
+        lines.append("")
+
+    # Fields table
+    lines.append("## Fields")
+    lines.append("")
+    lines.append("| name | label | type | nullable | notes |")
+    lines.append("|------|-------|------|----------|-------|")
+    for f in contract.fields:
+        notes = (f.notes or "").replace("|", "\\|").replace("\n", " ")
+        lines.append(
+            f"| `{f.name}` | {f.label} | {f.type} | {f.nullable} | {notes} |"
+        )
+    lines.append("")
+
+    # Derived fields table
+    if contract.derived_fields:
+        lines.append("## Derived fields")
+        lines.append("")
+        lines.append("| name | transformation | notes |")
+        lines.append("|------|----------------|-------|")
+        for d in contract.derived_fields:
+            notes = (d.notes or "").replace("|", "\\|").replace("\n", " ")
+            lines.append(
+                f"| `{d.name}` | `{d.transformation}` | {notes} |"
+            )
+        lines.append("")
+
+    return "\n".join(lines)

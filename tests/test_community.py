@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dictionary_pipeline.community import (
     SafetyReport,
+    dump_contract_yaml,
+    render_community_markdown,
     sanitize_contract,
     scan_contract,
     scan_profile,
@@ -213,3 +215,64 @@ def test_sanitize_scrubs_allowed_values_pii():
     # Partial-card values should be replaced with a summary count
     assert sanitized.fields[0].allowed_values is None
     assert "2 unique" in (sanitized.fields[0].notes or "")
+
+
+def test_dump_contract_yaml_roundtrip(tmp_path):
+    fields = [
+        FieldSpec(name="amount", label="Amount", type="decimal", dtype="float64",
+                  nullable=False, notes="USD transaction amount"),
+    ]
+    contract = _mk_contract(fields)
+    contract.community_version = "1.0.0"
+
+    yaml_text = dump_contract_yaml(contract)
+    assert "dataset:" in yaml_text
+    assert "name: test" in yaml_text
+    assert "community_version: 1.0.0" in yaml_text
+    assert "amount" in yaml_text
+    assert "USD transaction amount" in yaml_text
+
+
+def test_dump_contract_yaml_excludes_empty_fields():
+    fields = [FieldSpec(name="foo", label="Foo", type="text", dtype="string")]
+    contract = _mk_contract(fields)
+    yaml_text = dump_contract_yaml(contract)
+    # community_notes defaults to "" and should not appear
+    assert "community_notes" not in yaml_text
+    # shareable defaults to True, but community exports drop the flag
+    assert "shareable" not in yaml_text
+
+
+def test_render_markdown_includes_dataset_heading():
+    fields = [
+        FieldSpec(name="amount", label="Amount", type="decimal", dtype="float64",
+                  notes="USD amount"),
+    ]
+    contract = _mk_contract(fields)
+    md = render_community_markdown(contract)
+    assert "# test" in md
+    assert "## Fields" in md
+    assert "amount" in md
+    assert "USD amount" in md
+
+
+def test_render_markdown_includes_grain_and_source():
+    contract = _mk_contract([])
+    contract.grain = "one row per purchase"
+    contract.source = "Bank CSV export"
+    md = render_community_markdown(contract)
+    assert "one row per purchase" in md
+    assert "Bank CSV export" in md
+
+
+def test_render_markdown_shows_community_version_when_set():
+    contract = _mk_contract([])
+    contract.community_version = "1.2.0"
+    md = render_community_markdown(contract)
+    assert "1.2.0" in md
+
+
+def test_render_markdown_omits_derived_section_when_empty():
+    contract = _mk_contract([])
+    md = render_community_markdown(contract)
+    assert "## Derived fields" not in md
