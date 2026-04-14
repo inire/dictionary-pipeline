@@ -155,3 +155,45 @@ The test suite has 48 tests covering the contract layer (load, schema, validatio
    ```
 
 If patterns proliferate, factor them out to a registry module.
+
+## Community dictionary sharing
+
+Data dictionaries for common datasets (bank exports, retailer order history, etc.) are shared in the `community/` folder. Each entry contains a scrubbed `dictionary.yaml` and a human-readable `README.md`.
+
+### Using a community dictionary
+
+```bash
+# Copy the contract next to your own data
+cp community/shopping_orders/dictionary.yaml my_run/
+
+# Run the pipeline as usual
+dictionary-pipeline run \
+  --input my_data.csv \
+  --contract my_run/dictionary.yaml \
+  --workdir runs/my_run
+```
+
+You will likely need to adjust `source_column` mappings to match your specific export's headers, since that field is stripped from community artifacts.
+
+### Contributing a dictionary
+
+Build your own dictionary against a real dataset, then:
+
+```bash
+dictionary-pipeline community-export \
+  --contract path/to/your_dictionary.yaml \
+  --output-dir community/your_dataset/
+```
+
+This scans for PII, drops fields marked `shareable: false`, replaces `notes` with `community_notes` if provided, and redacts PII substrings (emails, SSNs, partial card numbers, phone numbers) from free-text fields. A PII-unsafe contract fails the export unless `--force` is passed — and `--force` still runs full sanitization, it just bypasses the blocking check.
+
+See [`community/CONTRIBUTING.md`](community/CONTRIBUTING.md) for the full guide.
+
+### PII redaction in profiles
+
+The Stage 1 profile's `top_values` entries can contain real data. Use `--redact-pii` to replace them with `[REDACTED_TYPE]` placeholders:
+
+```bash
+dictionary-pipeline profile --workdir runs/foo --redact-pii
+dictionary-pipeline run --input data.csv --contract dict.yaml --workdir runs/foo --redact-pii
+```

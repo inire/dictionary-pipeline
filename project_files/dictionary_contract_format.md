@@ -141,3 +141,49 @@ The dictionary is itself a versioned artifact. Recommended convention:
 - Update `dataset.last_updated` whenever the contract changes
 - Update `review_status` per field as decisions get confirmed or revisited
 - For breaking changes (renamed fields, removed fields, type changes), bump a `dataset.schema_version` field — currently optional but worth adding before the second downstream consumer of the same dictionary appears
+
+## Community sharing fields
+
+These fields control how a dictionary is scrubbed when `dictionary-pipeline community-export` builds a community-safe bundle.
+
+### Field-level
+
+```yaml
+- name: account_number
+  label: Account number
+  type: identifier
+  dtype: string
+  nullable: false
+  shareable: false   # drop this field entirely from community exports
+```
+
+```yaml
+- name: merchant
+  label: Merchant
+  type: text
+  dtype: string
+  nullable: false
+  notes: |
+    Real-world notes — may reference specific merchants, dates,
+    or values from your personal data.
+  community_notes: |
+    Generic description of the merchant field suitable for sharing.
+    Replaces `notes` in community exports.
+```
+
+**Rules applied during `community-export`:**
+1. Fields with `shareable: false` are dropped.
+2. If `community_notes` is set, it replaces `notes`.
+3. If only `notes` is set, PII substrings (email, SSN, partial card, phone) are redacted with `[REDACTED_TYPE]`.
+4. `allowed_values` containing PII are replaced with a count summary in notes.
+5. `source_column` is always cleared (user-specific header text).
+
+### Dataset-level
+
+```yaml
+dataset:
+  ...
+  community_version: "1.0.0"   # optional: version tag for shared artifacts
+```
+
+When set, `community_version` is preserved in the exported YAML and shown in the rendered markdown. Use semver and bump when the shared schema changes in ways that matter to consumers.
