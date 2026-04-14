@@ -29,6 +29,44 @@ _DIGIT_RE = re.compile(r"\d")
 _ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
+# Unanchored versions for substring scanning inside free text.
+# Use word boundaries and exclude ISO dates from phone matches.
+_SCAN_PATTERNS: list[tuple[str, re.Pattern]] = [
+    ("ssn", re.compile(r"\b\d{3}-\d{2}-\d{4}\b")),
+    ("email", re.compile(r"\b[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z]{2,}\b")),
+    ("credit_card", re.compile(r"\b\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}\b")),
+    ("partial_card", re.compile(r"(?:ending|last\s*4|card)\s*(?:in\s*)?\d{4}", re.IGNORECASE)),
+    ("phone", re.compile(r"\b\+?\d{3}[\s.-]?\d{3}[\s.-]?\d{4}\b")),
+]
+
+
+def find_pii(text: str | None) -> list[tuple[str, str]]:
+    """
+    Find PII occurrences inside a free-text string.
+
+    Unlike classify_pii (which checks if an entire value IS a PII type),
+    this searches for PII substrings within longer text like notes fields.
+
+    Returns a list of (pii_type, matched_text) tuples. Empty list if clean.
+    """
+    if not text:
+        return []
+
+    findings: list[tuple[str, str]] = []
+    for pii_type, pattern in _SCAN_PATTERNS:
+        for m in pattern.finditer(text):
+            matched = m.group(0)
+            # Guard: phone must have at least 7 digits and not be an ISO date
+            if pii_type == "phone":
+                if len(_DIGIT_RE.findall(matched)) < 7:
+                    continue
+                if _ISO_DATE_RE.match(matched):
+                    continue
+            findings.append((pii_type, matched))
+
+    return findings
+
+
 def classify_pii(value: str) -> str | None:
     """
     Classify a string value as a PII type, or None if not PII.

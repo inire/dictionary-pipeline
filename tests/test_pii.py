@@ -104,3 +104,41 @@ def test_redact_profile_preserves_structure():
     name_top = scrubbed["columns"]["name"]["top_values"]
     assert "Jane Doe" not in name_top
     assert "John Smith" not in name_top
+
+
+from dictionary_pipeline.pii import find_pii
+
+
+def test_find_pii_in_free_text():
+    text = "Contact customer at jane@example.com or 555-123-4567 for questions."
+    findings = find_pii(text)
+    types = [t for t, _ in findings]
+    assert "email" in types
+    assert "phone" in types
+
+
+def test_find_pii_returns_empty_for_clean_text():
+    assert find_pii("This is a normal sentence with no sensitive data.") == []
+
+
+def test_find_pii_handles_empty_and_none():
+    assert find_pii("") == []
+    assert find_pii(None) == []
+
+
+def test_find_pii_detects_partial_card_in_text():
+    findings = find_pii("The card ending 4122 was declined.")
+    types = [t for t, _ in findings]
+    assert "partial_card" in types
+
+
+def test_find_pii_detects_ssn_in_text():
+    findings = find_pii("SSN is 123-45-6789 on record.")
+    types = [t for t, _ in findings]
+    assert "ssn" in types
+
+
+def test_find_pii_ignores_iso_dates():
+    findings = find_pii("Updated 2026-04-14 per policy.")
+    # ISO date should not be classified as phone
+    assert not any(t == "phone" for t, _ in findings)
