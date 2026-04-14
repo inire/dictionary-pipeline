@@ -70,6 +70,7 @@ class Contract:
     pii_fields: list[str]
     naming_convention: str
     last_updated: str
+    community_version: str = ""
     fields: list[FieldSpec] = field(default_factory=list)
     derived_fields: list[DerivedFieldSpec] = field(default_factory=list)
 
@@ -110,6 +111,7 @@ def load_contract(path: str | Path) -> Contract:
         pii_fields=ds.get("pii_fields", []),
         naming_convention=ds.get("naming_convention", "snake_case"),
         last_updated=ds.get("last_updated", ""),
+        community_version=ds.get("community_version", ""),
         fields=fields,
         derived_fields=derived,
     )

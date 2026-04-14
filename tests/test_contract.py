@@ -321,3 +321,46 @@ fields:
     assert field_a.shareable is False
     assert field_b.shareable is True
     assert field_b.community_notes == "Generic description for community sharing"
+
+
+def test_contract_community_version_defaults_empty():
+    yaml_body = """
+dataset:
+  name: test_ds
+  description: test
+  source: test
+  grain: one row per thing
+  pii: false
+  pii_fields: []
+  naming_convention: snake_case
+  last_updated: "2026-04-14"
+fields: []
+"""
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+        f.write(yaml_body)
+        path = f.name
+
+    contract = load_contract(path)
+    assert contract.community_version == ""
+
+
+def test_contract_community_version_loads_from_yaml():
+    yaml_body = """
+dataset:
+  name: test_ds
+  description: test
+  source: test
+  grain: one row per thing
+  pii: false
+  pii_fields: []
+  naming_convention: snake_case
+  last_updated: "2026-04-14"
+  community_version: "1.0.0"
+fields: []
+"""
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+        f.write(yaml_body)
+        path = f.name
+
+    contract = load_contract(path)
+    assert contract.community_version == "1.0.0"
