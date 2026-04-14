@@ -95,3 +95,24 @@ def scan_contract(contract: Contract) -> SafetyReport:
         _scan_field_notes(f, report)
         _scan_field_allowed_values(f, report)
     return report
+
+
+def scan_profile(profile: dict) -> SafetyReport:
+    """
+    Scan a Stage 1 profile dict for PII in top_values entries.
+
+    Uses classify_pii (exact match) plus a person-name heuristic for each
+    value. This mirrors what redact_profile() in pii.py scrubs.
+    """
+    from .pii import _is_person_name  # private helper, safe to reuse
+
+    report = SafetyReport()
+    for col_name, col_info in profile.get("columns", {}).items():
+        top_values = col_info.get("top_values") or {}
+        for val in top_values.keys():
+            pii_type = classify_pii(val)
+            if pii_type is None and _is_person_name(val):
+                pii_type = "person_name"
+            if pii_type:
+                report.add(f"profile.columns.{col_name}.top_values", pii_type, val)
+    return report

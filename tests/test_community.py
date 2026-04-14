@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dictionary_pipeline.community import SafetyReport, scan_contract
+from dictionary_pipeline.community import SafetyReport, scan_contract, scan_profile
 from dictionary_pipeline.contract import Contract, FieldSpec
 
 
@@ -113,3 +113,40 @@ def test_scan_contract_finds_pii_in_community_notes():
         f.pii_type == "email" and f.location == "field.contact.community_notes"
         for f in report.findings
     )
+
+
+def test_scan_profile_clean_profile_is_safe():
+    profile = {
+        "row_count": 100,
+        "column_count": 2,
+        "columns": {
+            "amount": {
+                "dtype": "float64",
+                "top_values": {"10.00": 30, "25.00": 20},
+            },
+            "category": {
+                "dtype": "object",
+                "top_values": {"Food": 40, "Transport": 15},
+            },
+        },
+    }
+    report = scan_profile(profile)
+    assert report.is_safe is True
+
+
+def test_scan_profile_detects_email_in_top_values():
+    profile = {
+        "columns": {
+            "contact": {
+                "top_values": {"jane@example.com": 5, "john@example.com": 3},
+            },
+        },
+    }
+    report = scan_profile(profile)
+    assert report.is_safe is False
+    assert all(f.pii_type == "email" for f in report.findings)
+    assert len(report.findings) == 2
+
+
+def test_scan_profile_handles_missing_columns_key():
+    assert scan_profile({}).is_safe is True
