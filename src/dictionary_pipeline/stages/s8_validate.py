@@ -6,9 +6,11 @@ Three checks:
      introduced by stages 5/6/7).
   2. Diff against the intake archive on a per-column basis to surface any
      unexpected value changes.
-  3. (Optional, manual) Run the answer-prompt test questions.
+  3. QA checks — non-fatal warnings for data quality issues (infinity values,
+     suspicious rounding, future dates, column name hygiene).
 
-If any check fails, this stage raises and the pipeline halts before export.
+If schema revalidation or diff checks fail, this stage raises and the pipeline
+halts before export. QA checks are warnings only — they never raise.
 """
 
 from __future__ import annotations
@@ -16,6 +18,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from ..contract import Contract, build_pandera_schema, rename_to_contract
@@ -46,6 +49,59 @@ def _reread_archive(workdir: Path, archive_path: Path) -> pd.DataFrame:
     # fallback: dispatch on extension with defaults
     df, _ = read_source(archive_path)
     return df
+
+
+def _qa_checks(df: pd.DataFrame, contract: Contract) -> dict:
+    """
+    Run non-fatal QA checks on the final DataFrame.
+
+    Returns a dict with four keys, each a list of column names that triggered
+    the check.  Never raises — callers treat results as warnings only.
+
+    Checks performed:
+      - infinity_columns: numeric columns containing inf or -inf
+      - suspicious_rounding_columns: float columns where >90% of non-null
+        values are whole numbers (suggests data was truncated or mistyped)
+      - future_date_columns: datetime columns with values beyond today + 1 day
+      - bad_column_names: columns with leading/trailing whitespace, double
+        spaces, or non-ASCII characters
+    """
+    result: dict = {
+        "infinity_columns": [],
+        "suspicious_rounding_columns": [],
+        "future_date_columns": [],
+        "bad_column_names": [],
+    }
+
+    cutoff = pd.Timestamp.now() + pd.Timedelta(days=1)
+
+    for col in df.columns:
+        series = df[col]
+
+        # 1. Infinity — any numeric column
+        if pd.api.types.is_numeric_dtype(series):
+            try:
+                if np.isinf(series.dropna().astype(float)).any():
+                    result["infinity_columns"].append(col)
+            except (TypeError, ValueError, OverflowError):
+                pass
+
+        # 2. Suspicious rounding — float columns only
+        if pd.api.types.is_float_dtype(series):
+            non_null = series.dropna()
+            if len(non_null) > 0 and (non_null == non_null.round(0)).mean() > 0.9:
+                result["suspicious_rounding_columns"].append(col)
+
+        # 3. Future dates — datetime columns only
+        if pd.api.types.is_datetime64_any_dtype(series):
+            if (series.dropna() > cutoff).any():
+                result["future_date_columns"].append(col)
+
+        # 4. Column name hygiene
+        if col != col.strip() or "  " in col or not col.isascii():
+            result["bad_column_names"].append(col)
+
+    return result
 
 
 def run(
@@ -97,6 +153,9 @@ def run(
         if mismatches:
             diffs[col] = {"mismatches": mismatches}
     report["original_vs_final_diff"] = diffs
+
+    # 3. QA checks (warnings only — never raises)
+    report["qa_checks"] = _qa_checks(final_df, contract)
 
     (workdir / "validation_report.json").write_text(json.dumps(report, indent=2, default=str))
 
