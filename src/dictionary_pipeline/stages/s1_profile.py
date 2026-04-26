@@ -11,12 +11,51 @@ build. You can swap in ydata-profiling later by replacing `profile()`.
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
 
 from ..logging import TransformationLog
 from ..pii import redact_profile
+
+
+def _freshness_check(df: pd.DataFrame, stale_threshold_days: int = 90) -> dict:
+    """For each datetime column compute freshness stats. Return {"by_column": {...}}."""
+    now = datetime.now(timezone.utc)
+    by_column: dict = {}
+
+    for col in df.columns:
+        s = df[col]
+        if not pd.api.types.is_datetime64_any_dtype(s):
+            continue
+        non_null = s.dropna()
+        if len(non_null) == 0:
+            continue
+
+        newest = non_null.max()
+        oldest = non_null.min()
+
+        # Normalise to UTC-aware for comparison
+        if newest.tzinfo is None:
+            newest_aware = newest.tz_localize("UTC")
+        else:
+            newest_aware = newest.tz_convert("UTC")
+
+        span_days = float((newest - oldest).total_seconds() / 86400)
+        staleness_days = float((now - newest_aware).total_seconds() / 86400)
+
+        by_column[col] = {
+            "newest": str(newest),
+            "oldest": str(oldest),
+            "span_days": round(span_days, 3),
+            "staleness_days": round(staleness_days, 3),
+            "is_stale": staleness_days > stale_threshold_days,
+        }
+
+    if not by_column:
+        return {}
+    return {"by_column": by_column}
 
 
 def profile(df: pd.DataFrame) -> dict:
@@ -60,6 +99,12 @@ def profile(df: pd.DataFrame) -> dict:
                 col_info["max_length"] = int(lengths.max())
 
         summary["columns"][col] = col_info
+
+    freshness = _freshness_check(df)
+    summary["freshness"] = freshness
+    if freshness:
+        for col, col_freshness in freshness["by_column"].items():
+            summary["columns"][col]["freshness"] = col_freshness
 
     return summary
 
