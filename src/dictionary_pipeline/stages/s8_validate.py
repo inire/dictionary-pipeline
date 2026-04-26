@@ -51,6 +51,151 @@ def _reread_archive(workdir: Path, archive_path: Path) -> pd.DataFrame:
     return df
 
 
+def _sample_indices(mask: "pd.Series[bool]", n: int = 5) -> list:
+    """Return up to *n* integer positions where *mask* is True."""
+    return [int(i) for i in mask.index[mask][:n]]
+
+
+def _check_date_ordering(df: pd.DataFrame, col_start: str, col_end: str) -> dict:
+    """Return a cross-field check entry verifying start <= end for a date pair."""
+    try:
+        a = pd.to_datetime(df[col_start], errors="coerce")
+        b = pd.to_datetime(df[col_end], errors="coerce")
+        both = a.notna() & b.notna()
+        violation_mask = both & (a > b)
+    except Exception:
+        violation_mask = pd.Series(False, index=df.index)
+    return {
+        "check": "date_ordering",
+        "columns": [col_start, col_end],
+        "violations": int(violation_mask.sum()),
+        "sample_rows": _sample_indices(violation_mask),
+    }
+
+
+def _check_numeric_range(df: pd.DataFrame, col_min: str, col_max: str) -> dict:
+    """Return a cross-field check entry verifying min <= max for a numeric pair."""
+    try:
+        a = pd.to_numeric(df[col_min], errors="coerce")
+        b = pd.to_numeric(df[col_max], errors="coerce")
+        both = a.notna() & b.notna()
+        violation_mask = both & (a > b)
+    except Exception:
+        violation_mask = pd.Series(False, index=df.index)
+    return {
+        "check": "numeric_range",
+        "columns": [col_min, col_max],
+        "violations": int(violation_mask.sum()),
+        "sample_rows": _sample_indices(violation_mask),
+    }
+
+
+def _check_referential_presence(
+    df: pd.DataFrame, col_ref: str, col_target: str
+) -> dict:
+    """Return a cross-field check entry verifying all non-null refs exist in target."""
+    try:
+        target_vals = set(df[col_target].dropna().astype(str))
+        ref_notna = df[col_ref].notna()
+        violation_mask = pd.Series(False, index=df.index)
+        violation_mask[ref_notna] = ~df[col_ref][ref_notna].astype(str).isin(target_vals)
+    except Exception:
+        violation_mask = pd.Series(False, index=df.index)
+    return {
+        "check": "referential_presence",
+        "columns": [col_ref, col_target],
+        "violations": int(violation_mask.sum()),
+        "sample_rows": _sample_indices(violation_mask),
+    }
+
+
+def _check_mutex_nulls(
+    df: pd.DataFrame, col_a: str, col_b: str
+) -> "dict | None":
+    """Return a cross-field check entry when col_a/col_b are mutually exclusive nulls."""
+    a_present = df[col_a].notna()
+    b_present = df[col_b].notna()
+    if (a_present & b_present).any():
+        return None
+    if not a_present.any() or not b_present.any():
+        return None
+    return {
+        "check": "mutually_exclusive_nulls",
+        "columns": [col_a, col_b],
+        "violations": 0,
+        "sample_rows": [],
+    }
+
+
+def _cross_field_checks(df: pd.DataFrame, contract: Contract) -> list[dict]:
+    """
+    Run cross-field consistency checks on the final DataFrame.
+
+    Four families:
+      1. Date ordering  — start/end, open/close, created_at/updated_at pairs
+      2. Numeric range  — min/max, low/high pairs
+      3. Referential presence — *_<id_col> columns that should reference <id_col>
+      4. Mutually exclusive nulls — union-type column splits
+
+    Returns a list of dicts; each has keys:
+      check, columns, violations (int), sample_rows (list of up to 5 indices).
+
+    Never raises — callers treat results as warnings only.
+    """
+    results: list[dict] = []
+    cols = set(df.columns)
+
+    # 1. Date ordering
+    _DATE_PREFIX_PAIRS = [("start", "end"), ("open", "close")]
+    _DATE_EXACT_PAIRS = [("created_at", "updated_at")]
+
+    seen_date: set[tuple[str, str]] = set()
+    for prefix_a, prefix_b in _DATE_PREFIX_PAIRS:
+        for col_a in sorted(cols):
+            if col_a == prefix_a or col_a.startswith(prefix_a + "_"):
+                suffix = col_a[len(prefix_a):]
+                col_b = prefix_b + suffix
+                if col_b in cols and (col_a, col_b) not in seen_date:
+                    seen_date.add((col_a, col_b))
+                    results.append(_check_date_ordering(df, col_a, col_b))
+    for col_a, col_b in _DATE_EXACT_PAIRS:
+        if col_a in cols and col_b in cols and (col_a, col_b) not in seen_date:
+            seen_date.add((col_a, col_b))
+            results.append(_check_date_ordering(df, col_a, col_b))
+
+    # 2. Numeric range
+    _RANGE_PREFIX_PAIRS = [("min", "max"), ("low", "high")]
+
+    seen_range: set[tuple[str, str]] = set()
+    for prefix_a, prefix_b in _RANGE_PREFIX_PAIRS:
+        for col_a in sorted(cols):
+            if col_a == prefix_a or col_a.startswith(prefix_a + "_"):
+                suffix = col_a[len(prefix_a):]
+                col_b = prefix_b + suffix
+                if col_b in cols and (col_a, col_b) not in seen_range:
+                    seen_range.add((col_a, col_b))
+                    results.append(_check_numeric_range(df, col_a, col_b))
+
+    # 3. Referential presence — col ending with "_<target>" references target
+    for col_target in sorted(cols):
+        for col_ref in sorted(cols):
+            if col_ref != col_target and col_ref.endswith("_" + col_target):
+                results.append(_check_referential_presence(df, col_ref, col_target))
+
+    # 4. Mutually exclusive nulls — only columns that have both nulls and non-nulls
+    nullable_cols = [c for c in df.columns if df[c].isna().any() and df[c].notna().any()]
+    seen_mutex: set[tuple[str, str]] = set()
+    for i, col_a in enumerate(nullable_cols):
+        for col_b in nullable_cols[i + 1:]:
+            if (col_a, col_b) not in seen_mutex:
+                seen_mutex.add((col_a, col_b))
+                entry = _check_mutex_nulls(df, col_a, col_b)
+                if entry is not None:
+                    results.append(entry)
+
+    return results
+
+
 def _qa_checks(df: pd.DataFrame, contract: Contract) -> dict:
     """
     Run non-fatal QA checks on the final DataFrame.
@@ -156,6 +301,9 @@ def run(
 
     # 3. QA checks (warnings only — never raises)
     report["qa_checks"] = _qa_checks(final_df, contract)
+
+    # 4. Cross-field checks (warnings only — never raises)
+    report["cross_field_checks"] = _cross_field_checks(final_df, contract)
 
     (workdir / "validation_report.json").write_text(json.dumps(report, indent=2, default=str))
 
