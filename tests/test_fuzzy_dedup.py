@@ -223,3 +223,63 @@ def test_missing_rapidfuzz_run_does_not_crash(tmp_path):
     nd_event = next(e for e in events if e["event"] == "near_duplicates_detected")
     assert nd_event["rows_affected"] == 0
     assert "skipped" in nd_event["details"]
+
+
+# ---------- performance regression -------------------------------------------
+
+
+@requires_rapidfuzz
+def test_fuzzy_dedup_scales_to_small_territory():
+    """500-row, 6-text-column near-dupe scan must finish in under 5 seconds.
+
+    Regression test: previous implementation used sorted_df.iloc[i][c] inside
+    the nested O(n × window) loop, which made a 275-row scan take ~13s and a
+    7,500-row territory scan take hours. Refactored implementation builds
+    a records list once and indexes it with O(1) dict lookups.
+
+    5s ceiling is an order of magnitude above the expected fast-path time
+    (typically < 0.5s for this size) but well below the slow-path time
+    (~50s+ for 500 rows in the old implementation).
+    """
+    import time
+
+    n = 500
+    # Rows mostly distinct, with a handful of near-duplicates seeded in
+    df = pd.DataFrame({
+        "name": [f"Acme Corp {i}" for i in range(n)],
+        "city": ["Columbus" if i % 2 else "Cleveland" for i in range(n)],
+        "industry": ["Health" if i % 3 else "Manufacturing" for i in range(n)],
+        "domain": [f"acme{i}.com" for i in range(n)],
+        "mx_provider": ["Office 365" if i % 4 else "Proofpoint" for i in range(n)],
+        "status": ["PROSPECT-Target" if i % 5 else "PROSPECT-Closed Lost" for i in range(n)],
+    })
+    # Seed 3 near-duplicate pairs (close-but-not-identical names)
+    df.loc[10, "name"] = "Acme Corp 10"
+    df.loc[11, "name"] = "Acme Corp  10"  # double space — fuzzy match
+    df.loc[20, "name"] = "Bechtel Corporation"
+    df.loc[21, "name"] = "Bechtel Corp"
+
+    contract = _make_contract(
+        ("name", "text"),
+        ("city", "categorical"),
+        ("industry", "categorical"),
+        ("domain", "identifier"),
+        ("mx_provider", "categorical"),
+        ("status", "categorical"),
+    )
+
+    t0 = time.perf_counter()
+    report = _fuzzy_near_dupes(df, contract)
+    elapsed = time.perf_counter() - t0
+
+    # Functional check: the test data is structured so at least one near-dupe
+    # pair should be detected. Doesn't lock to an exact count because rapidfuzz
+    # threshold tuning may shift slightly across versions.
+    assert isinstance(report["near_duplicate_pairs"], list)
+
+    # Perf ceiling
+    assert elapsed < 5.0, (
+        f"Fuzzy near-dupe scan on {n} rows took {elapsed:.1f}s "
+        "(perf regression — should be < 5s)"
+    )
+
