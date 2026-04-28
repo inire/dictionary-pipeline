@@ -6,7 +6,7 @@
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue?logo=python&logoColor=white)](https://python.org)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![pandas-first](https://img.shields.io/badge/pandas--first-deterministic-orange)](https://github.com/inire/dictionary-pipeline)
-[![Tests: 48](https://img.shields.io/badge/tests-48_passing-brightgreen)](tests/)
+[![Tests: 141+](https://img.shields.io/badge/tests-141%2B_passing-brightgreen)](tests/)
 
 The **data dictionary is the contract** — a single YAML file that *is* the schema, *generates* the pandera validator, *specifies* all derivations, and *renders* into the final Excel deliverable's documentation tab. LLM calls are scoped to exactly the two stages where judgment actually matters; everything else is deterministic Python.
 
@@ -72,7 +72,7 @@ Yellow = manual step · Blue = LLM call · White = deterministic Python
 | Stage | Name | Mutates data? | LLM? | What it does |
 |-------|------|:---:|:---:|-------------|
 | 0 | Intake | no | no | Preserves the original; loads with auto-encoding and auto-header detection |
-| 1 | Profile | no | no | Stats, top values, and PII flags before you touch anything |
+| 1 | Profile | no | no | Stats, top values, and PII flags; generates `profile_report.html` when `[profiling]` is installed |
 | 2 | Answer prompt | no | yes | You describe what each column means — feeds the dictionary draft |
 | 3 | Draft dictionary | no | yes | Produces the YAML contract from your descriptions and the profile |
 | 4 | Schema enforce | coercion | no | Rejects or coerces values that violate the contract |
@@ -162,7 +162,18 @@ src/dictionary_pipeline/
 pytest tests/ -v
 ```
 
-48 tests cover: contract layer, intake (CSV/TSV/encoding/header detection), PII detection and profile redaction, bulk schema grouping, and scrub utilities.
+Test matrix (extras determine which tests run):
+
+| Install | Passed | Skipped |
+|---------|:------:|:-------:|
+| Default (no extras) | 141 | 9 |
+| `[fuzzy]` | 146 | 9 |
+| `[profiling]` | 146 | 9 |
+| `[fuzzy,profiling]` | 151 | 9 |
+
+The 9 skipped tests are fixture-gated (doordash/instacart examples are gitignored); they run locally where fixtures exist, skip cleanly on fresh clones.
+
+Coverage: contract layer (including nullable extension dtypes), intake (CSV/TSV/encoding/header detection), PII detection and profile redaction, bulk schema grouping, scrub utilities, fuzzy near-dupe detection, and profiling HTML report generation.
 
 ---
 
