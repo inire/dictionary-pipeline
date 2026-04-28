@@ -129,13 +129,22 @@ def _clean(d: dict) -> dict:
 # ---------- pandera schema construction ---------------------------------------
 
 
-# Map our type names to pandera dtype + Check builders
+# Map our type names to pandera dtype + Check builders.
+#
+# Convention: lowercase names map to numpy dtypes (no NA support),
+# capitalized names map to pandas nullable extension dtypes (NA support).
+# This mirrors pandas' own naming convention. Using the capitalized form
+# in a contract is required when `nullable: true` is set on a non-string
+# column, because numpy int/bool/float dtypes cannot represent NA and
+# pandera's coerce step will fail on any missing value.
 _DTYPE_MAP = {
-    "string": pa.String,
-    "Int64": pa.Int64,
+    "string": pd.StringDtype(),
+    "Int64": pd.Int64Dtype(),
     "int64": pa.Int64,
+    "Float64": pd.Float64Dtype(),
     "float64": pa.Float64,
     "datetime64[ns]": pa.DateTime,
+    "boolean": pd.BooleanDtype(),
     "bool": pa.Bool,
 }
 
