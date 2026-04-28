@@ -9,6 +9,21 @@ from unittest.mock import patch
 import pandas as pd
 import pytest
 
+# rapidfuzz is an optional extra (`pip install -e ".[fuzzy]"`). Tests that
+# assert real fuzzy-matching output need it; tests that exercise the
+# graceful-degradation path (or trivially pass either way) do not.
+try:
+    import rapidfuzz  # noqa: F401
+
+    _HAS_RAPIDFUZZ = True
+except ImportError:
+    _HAS_RAPIDFUZZ = False
+
+requires_rapidfuzz = pytest.mark.skipif(
+    not _HAS_RAPIDFUZZ,
+    reason='rapidfuzz not installed; install with pip install -e ".[fuzzy]"',
+)
+
 from dictionary_pipeline.contract import Contract, FieldSpec
 from dictionary_pipeline.stages.s5_clean import _fuzzy_near_dupes, run
 from dictionary_pipeline.logging import TransformationLog
@@ -43,6 +58,7 @@ def _make_contract(*field_names_and_types: tuple[str, str]) -> Contract:
 # Core detection tests
 # ---------------------------------------------------------------------------
 
+@requires_rapidfuzz
 def test_similar_rows_detected():
     """Two rows that are ~90% similar must be flagged."""
     df = pd.DataFrame({
@@ -76,6 +92,7 @@ def test_different_rows_not_flagged():
     assert report["near_duplicate_pairs"] == []
 
 
+@requires_rapidfuzz
 def test_threshold_is_respected():
     """Results just below the threshold are not included."""
     df = pd.DataFrame({
@@ -93,6 +110,7 @@ def test_threshold_is_respected():
     assert len(report["near_duplicate_pairs"]) == 1
 
 
+@requires_rapidfuzz
 def test_exact_dupes_skipped_fuzzy_catches_near_match():
     """After exact dedup, fuzzy still catches near-duplicates that survived."""
     # Row 0 and 1 are exact → removed by exact dedup inside run()
@@ -140,6 +158,7 @@ def test_no_text_columns_returns_empty():
 # Logging integration
 # ---------------------------------------------------------------------------
 
+@requires_rapidfuzz
 def test_run_logs_near_duplicate_event(tmp_path):
     """run() must log 'near_duplicates_detected' to TransformationLog."""
     df = pd.DataFrame({
