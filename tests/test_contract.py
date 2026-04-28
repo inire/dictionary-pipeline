@@ -18,7 +18,21 @@ from dictionary_pipeline.contract import (
 EXAMPLES = Path(__file__).parent.parent / "examples" / "doordash"
 INSTACART = Path(__file__).parent.parent / "examples" / "instacart"
 
+# The examples/ directory is gitignored because it contains personal
+# financial data. Tests that consume those fixtures only run when the
+# files are present locally; on a fresh clone (or in CI without the
+# private fixtures), they skip cleanly instead of failing.
+_requires_doordash_fixture = pytest.mark.skipif(
+    not (EXAMPLES / "dictionary.yaml").exists(),
+    reason="examples/doordash/dictionary.yaml not present (gitignored fixture)",
+)
+_requires_instacart_fixture = pytest.mark.skipif(
+    not (INSTACART / "dictionary.yaml").exists(),
+    reason="examples/instacart/dictionary.yaml not present (gitignored fixture)",
+)
 
+
+@_requires_doordash_fixture
 def test_load_contract_doordash():
     c = load_contract(EXAMPLES / "dictionary.yaml")
     assert c.dataset_name == "doordash_2026_purchased_items"
@@ -28,6 +42,7 @@ def test_load_contract_doordash():
     assert "delivery_address" in c.pii_fields
 
 
+@_requires_doordash_fixture
 def test_source_to_field_map():
     c = load_contract(EXAMPLES / "dictionary.yaml")
     m = c.source_to_field_map()
@@ -35,6 +50,7 @@ def test_source_to_field_map():
     assert m["Payment Methods"] == "payment_method"  # plural -> singular rename
 
 
+@_requires_doordash_fixture
 def test_build_pandera_schema():
     c = load_contract(EXAMPLES / "dictionary.yaml")
     schema = build_pandera_schema(c)
@@ -43,6 +59,7 @@ def test_build_pandera_schema():
     assert "currency" in schema.columns
 
 
+@_requires_doordash_fixture
 def test_schema_validates_synthetic_dataframe():
     c = load_contract(EXAMPLES / "dictionary.yaml")
     schema = build_pandera_schema(c)
@@ -65,6 +82,7 @@ def test_schema_validates_synthetic_dataframe():
     assert len(validated) == 1
 
 
+@_requires_doordash_fixture
 def test_schema_rejects_bad_categorical():
     c = load_contract(EXAMPLES / "dictionary.yaml")
     schema = build_pandera_schema(c)
@@ -87,6 +105,7 @@ def test_schema_rejects_bad_categorical():
         schema.validate(df)
 
 
+@_requires_doordash_fixture
 def test_derivations_compute_correctly():
     c = load_contract(EXAMPLES / "dictionary.yaml")
     df = pd.DataFrame([
@@ -107,6 +126,7 @@ def test_derivations_compute_correctly():
     assert out.loc[2, "order_total"] == 20.0
 
 
+@_requires_doordash_fixture
 def test_rename_preserves_unmapped_columns():
     c = load_contract(EXAMPLES / "dictionary.yaml")
     df = pd.DataFrame([{"Order Status": "Delivered", "ExtraColumn": "x"}])
@@ -244,6 +264,7 @@ def test_derivation_unrecognized_pattern_raises():
         apply_derivations(df, contract)
 
 
+@_requires_instacart_fixture
 def test_load_contract_instacart():
     c = load_contract(INSTACART / "dictionary.yaml")
     assert c.dataset_name == "instacart_2025_purchased_items"
@@ -253,6 +274,7 @@ def test_load_contract_instacart():
     assert "shipping_address" in c.pii_fields
 
 
+@_requires_instacart_fixture
 def test_instacart_derivations_against_engine():
     """Verify the Instacart dictionary's derivations run through the field-agnostic engine."""
     c = load_contract(INSTACART / "dictionary.yaml")
@@ -364,3 +386,86 @@ fields: []
 
     contract = load_contract(path)
     assert contract.community_version == "1.0.0"
+
+
+# ---------- nullable extension dtype regression ------------------------------
+
+
+def _contract_with_nullable_int() -> Contract:
+    """Minimal contract with one nullable Int64 column."""
+    return Contract(
+        dataset_name="nullable_int_test",
+        description="regression",
+        source="synthetic",
+        grain="one row per record",
+        pii=False,
+        pii_fields=[],
+        naming_convention="snake_case",
+        last_updated="2026-04-27",
+        fields=[
+            FieldSpec(
+                name="id",
+                label="ID",
+                type="integer",
+                dtype="int64",
+                nullable=False,
+            ),
+            FieldSpec(
+                name="age",
+                label="Age",
+                type="integer",
+                dtype="Int64",
+                nullable=True,
+            ),
+        ],
+    )
+
+
+def test_nullable_int64_accepts_nan_via_extension_dtype():
+    """`dtype: Int64` + `nullable: true` must coerce NaN to pd.NA, not crash.
+
+    Regression test: previously both `Int64` and `int64` mapped to numpy
+    int64, which cannot hold NaN, so any nullable integer column with a
+    missing value blew up at coerce time.
+    """
+    schema = build_pandera_schema(_contract_with_nullable_int())
+
+    df = pd.DataFrame({"id": [1, 2, 3], "age": [34, None, 45]})
+    out = schema.validate(df)
+
+    # pandas nullable extension dtype, not numpy int64
+    assert str(out["age"].dtype) == "Int64"
+    assert out["age"].isna().sum() == 1
+    # non-null values preserved
+    assert out["age"].iloc[0] == 34
+
+
+def test_lowercase_int64_remains_numpy_dtype():
+    """`dtype: int64` (lowercase) must continue to map to numpy int64.
+
+    Backwards-compat guarantee: lowercase form is the non-nullable numpy
+    dtype, capitalized form is the pandas nullable extension dtype.
+    """
+    contract = Contract(
+        dataset_name="numpy_int_test",
+        description="bc",
+        source="synthetic",
+        grain="one row per record",
+        pii=False,
+        pii_fields=[],
+        naming_convention="snake_case",
+        last_updated="2026-04-27",
+        fields=[
+            FieldSpec(
+                name="count",
+                label="Count",
+                type="integer",
+                dtype="int64",
+                nullable=False,
+            ),
+        ],
+    )
+    schema = build_pandera_schema(contract)
+    df = pd.DataFrame({"count": [1, 2, 3]})
+    out = schema.validate(df)
+    assert str(out["count"].dtype) == "int64"
